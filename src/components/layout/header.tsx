@@ -2,7 +2,7 @@
 
 import React, { useState } from "react";
 import { usePathname } from "next/navigation";
-import { Search, Bell, Plus, Menu, X, User } from "lucide-react";
+import { Search, Plus, Menu, X, User } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { CompetitorSearch } from "./competitor-search";
@@ -46,16 +46,6 @@ export function Header({ onAddCompetitorClick, onMobileMenuToggle }: HeaderProps
       <div className="flex items-center gap-3">
         {/* Functional Global Competitor Search */}
         <CompetitorSearch />
-
-        {/* Notifications */}
-        <button
-          type="button"
-          className="relative p-2 text-slate-500 hover:text-slate-800 rounded-md hover:bg-slate-100 transition-colors"
-          aria-label="Notifications"
-        >
-          <Bell className="h-4 w-4" />
-          <span className="absolute top-1.5 right-1.5 h-2 w-2 rounded-full bg-indigo-600 ring-2 ring-white" />
-        </button>
 
         {/* Quick Add Competitor button */}
         <Button
