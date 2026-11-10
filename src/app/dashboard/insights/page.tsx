@@ -21,6 +21,7 @@ import {
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { ConfirmDeleteAlert } from "@/components/ui/confirm-delete-alert";
 
 interface CompetitorOption {
   id: string;
@@ -67,6 +68,8 @@ export default function InsightsChatbotPage() {
   const [inputValue, setInputValue] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [historySidebarOpen, setHistorySidebarOpen] = useState(true);
+  const [sessionToDelete, setSessionToDelete] = useState<ChatSessionItem | null>(null);
+  const [isDeletingSession, setIsDeletingSession] = useState(false);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -167,24 +170,33 @@ export default function InsightsChatbotPage() {
     ]);
   };
 
-  // Delete chat session
-  const handleDeleteSession = async (e: React.MouseEvent, sessionId: string) => {
+  // Prompt delete chat session alert
+  const promptDeleteSession = (e: React.MouseEvent, session: ChatSessionItem) => {
     e.stopPropagation();
-    if (!confirm("Delete this analysis session?")) return;
+    setSessionToDelete(session);
+  };
+
+  // Confirmed delete execution
+  const executeDeleteSession = async () => {
+    if (!sessionToDelete) return;
+    setIsDeletingSession(true);
 
     try {
-      await fetch(`/api/insights/sessions/${sessionId}`, { method: "DELETE" });
-      const remaining = sessions.filter((s) => s.id !== sessionId);
+      await fetch(`/api/insights/sessions/${sessionToDelete.id}`, { method: "DELETE" });
+      const remaining = sessions.filter((s) => s.id !== sessionToDelete.id);
       setSessions(remaining);
-      if (activeSessionId === sessionId) {
+      if (activeSessionId === sessionToDelete.id) {
         if (remaining.length > 0) {
           loadSessionMessages(remaining[0].id);
         } else {
           startNewChatSession();
         }
       }
+      setSessionToDelete(null);
     } catch (err) {
       console.error("Failed to delete session:", err);
+    } finally {
+      setIsDeletingSession(false);
     }
   };
 
@@ -374,7 +386,7 @@ export default function InsightsChatbotPage() {
                         <span className="truncate">{sess.title}</span>
                       </div>
                       <button
-                        onClick={(e) => handleDeleteSession(e, sess.id)}
+                        onClick={(e) => promptDeleteSession(e, sess)}
                         className={`opacity-0 group-hover:opacity-100 p-1 hover:text-rose-500 transition-opacity ${
                           isActive ? "text-white/80 hover:text-white" : "text-slate-400"
                         }`}
@@ -603,6 +615,18 @@ export default function InsightsChatbotPage() {
           </div>
         </Card>
       </div>
+
+      {/* Interactive Delete Alert Modal */}
+      <ConfirmDeleteAlert
+        isOpen={!!sessionToDelete}
+        title="Delete Intelligence Session"
+        description="Are you sure you want to delete this competitive intelligence session? All messages and analysis in this thread will be permanently erased from database records."
+        itemName={sessionToDelete?.title}
+        confirmText="Delete Session"
+        isDeleting={isDeletingSession}
+        onConfirm={executeDeleteSession}
+        onClose={() => setSessionToDelete(null)}
+      />
     </div>
   );
 }
