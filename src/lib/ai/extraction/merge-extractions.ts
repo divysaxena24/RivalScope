@@ -65,13 +65,33 @@ export function mergeExtractionPasses(
     for (const plan of res.plans) {
       // Identity key must distinguish:
       // 1. Normalized plan name
-      // 2. Billing period ("monthly" vs "yearly" vs "custom")
+      // 2. Billing period ("monthly" vs "yearly" vs "custom") - treated as wildcard if "unknown"
       // 3. Currency / Region if provided
-      const key = `${plan.planName.trim().toLowerCase()}::${plan.billingPeriod || "monthly"}::${plan.currency || "any"}`;
-      if (!mergedPlansMap.has(key)) {
+      const normalizedName = plan.planName.trim().toLowerCase();
+      const planBilling = plan.billingPeriod && plan.billingPeriod !== "unknown" ? plan.billingPeriod : null;
+      const planCurr = plan.currency || null;
+
+      // Check if an existing plan matches this plan's identity (allowing unknown billing/currency to match specific)
+      let matchedKey: string | null = null;
+      for (const [k, existing] of mergedPlansMap.entries()) {
+        const existName = existing.planName.trim().toLowerCase();
+        if (existName === normalizedName) {
+          const existBilling = existing.billingPeriod && existing.billingPeriod !== "unknown" ? existing.billingPeriod : null;
+          const billingMatches = !planBilling || !existBilling || planBilling === existBilling;
+          const existCurr = existing.currency || null;
+          const currMatches = !planCurr || !existCurr || planCurr === existCurr;
+          if (billingMatches && currMatches) {
+            matchedKey = k;
+            break;
+          }
+        }
+      }
+
+      if (!matchedKey) {
+        const key = `${normalizedName}::${planBilling || "default"}::${planCurr || "any"}`;
         mergedPlansMap.set(key, { ...plan });
       } else {
-        const existing = mergedPlansMap.get(key)!;
+        const existing = mergedPlansMap.get(matchedKey)!;
 
         // Merge pricing info (prefer non-null price and explicit currency)
         if (existing.price === null && plan.price !== null) {
