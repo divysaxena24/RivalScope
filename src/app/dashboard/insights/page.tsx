@@ -23,6 +23,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { ConfirmDeleteAlert } from "@/components/ui/confirm-delete-alert";
 import { FormattedChatContent } from "@/components/ui/formatted-chat-content";
+import { normalizeChatError } from "@/lib/intelligence/chat-intent";
 
 interface CompetitorOption {
   id: string;
@@ -260,19 +261,20 @@ export default function InsightsChatbotPage() {
         }),
       });
 
-      const json = await res.json();
+      const json = await res.json().catch(() => null);
 
-      if (!res.ok || !json.success) {
-        throw new Error(json.error || "Failed to get chatbot response");
+      if (!res.ok || !json || !json.success) {
+        const errorDetail = json?.error || (typeof json === "string" ? json : null);
+        throw new Error(errorDetail || `Request failed with status ${res.status}`);
       }
 
       // Update active session ID
-      if (json.data.sessionId && json.data.sessionId !== activeSessionId) {
+      if (json.data?.sessionId && json.data.sessionId !== activeSessionId) {
         setActiveSessionId(json.data.sessionId);
         // Refresh session list in sidebar
         const sessRes = await fetch("/api/insights/sessions");
-        const sessJson = await sessRes.json();
-        if (sessJson.success) {
+        const sessJson = await sessRes.json().catch(() => null);
+        if (sessJson?.success && Array.isArray(sessJson.data?.sessions)) {
           setSessions(sessJson.data.sessions);
         }
       }
@@ -280,17 +282,19 @@ export default function InsightsChatbotPage() {
       const botMsg: ChatMessage = {
         id: `bot-${Date.now()}`,
         role: "assistant",
-        content: json.data.reply,
+        content: json.data?.reply || "Analysis complete.",
         timestamp: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
-        groundedCompetitors: json.data.groundedCompetitors,
+        groundedCompetitors: json.data?.groundedCompetitors,
       };
 
       setMessages((prev) => [...prev, botMsg]);
-    } catch (err: any) {
+    } catch (err: unknown) {
+      // Safe error normalization: prevents [object Object] leaks and presents friendly assistant bubble
+      const normalized = normalizeChatError(err);
       const errorMsg: ChatMessage = {
         id: `err-${Date.now()}`,
         role: "assistant",
-        content: `⚠️ **Error retrieving intelligence:** ${err.message || "An unexpected error occurred. Please try again."}`,
+        content: normalized.friendlyMessage,
         timestamp: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
       };
       setMessages((prev) => [...prev, errorMsg]);

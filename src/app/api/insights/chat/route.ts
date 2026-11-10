@@ -3,10 +3,16 @@ import { z } from "zod";
 import { getGroqClient } from "@/lib/ai/client";
 import { DEFAULT_EXTRACTION_CONFIG } from "@/lib/ai/model-config";
 import { buildChatbotCompetitorContext } from "@/lib/intelligence/chat-context";
+import {
+  classifyQueryScope,
+  normalizeChatError,
+  OUT_OF_SCOPE_FRIENDLY_MESSAGE,
+  INSUFFICIENT_DATA_FRIENDLY_MESSAGE,
+} from "@/lib/intelligence/chat-intent";
 import { successResponse, errorResponse } from "@/lib/api/response";
 import { db } from "@/lib/db";
-import { chatSessions, chatMessages } from "@/lib/db/schema";
-import { eq } from "drizzle-orm";
+import { chatSessions, chatMessages, competitors } from "@/lib/db/schema";
+import { eq, inArray } from "drizzle-orm";
 
 const ChatRequestSchema = z.object({
   sessionId: z.string().optional(),
@@ -105,6 +111,32 @@ export async function POST(req: NextRequest) {
       groundedCompetitorIds: competitorIds,
     });
 
+    // 2.1 Fast Scope Classification: Reject clearly out-of-scope inquiries without expensive retrieval
+    const activeCompetitorRecords = await db
+      .select({ id: competitors.id, name: competitors.name })
+      .from(competitors)
+      .where(eq(competitors.status, "active"));
+
+    const competitorNames = activeCompetitorRecords.map((c) => c.name);
+    const scopeCheck = classifyQueryScope(latestUserMessage.content, competitorNames);
+
+    if (!scopeCheck.inScope) {
+      // Store out-of-scope friendly response directly
+      await db.insert(chatMessages).values({
+        sessionId: activeSessionId,
+        role: "assistant",
+        content: OUT_OF_SCOPE_FRIENDLY_MESSAGE,
+        groundedCompetitorIds: [],
+      });
+
+      return successResponse({
+        sessionId: activeSessionId,
+        reply: OUT_OF_SCOPE_FRIENDLY_MESSAGE,
+        groundedCompetitors: [],
+        classification: "OUT_OF_SCOPE",
+      });
+    }
+
     // 3. Fetch grounded competitor facts from Neon database
     const { competitors: activeComps, summaryText } = await buildChatbotCompetitorContext(competitorIds);
 
@@ -121,6 +153,36 @@ export async function POST(req: NextRequest) {
         sessionId: activeSessionId,
         reply: fallbackReply,
         groundedCompetitors: [],
+        classification: "INSUFFICIENT_DATA",
+      });
+    }
+
+    // Check if competitor profile exists but has zero plans and zero features
+    const totalDataPoints = activeComps.reduce(
+      (acc, c) => acc + c.plans.length + c.features.length + c.recentChanges.length,
+      0
+    );
+
+    if (totalDataPoints === 0) {
+      await db.insert(chatMessages).values({
+        sessionId: activeSessionId,
+        role: "assistant",
+        content: INSUFFICIENT_DATA_FRIENDLY_MESSAGE,
+        groundedCompetitorIds: activeComps.map((c) => c.id),
+      });
+
+      return successResponse({
+        sessionId: activeSessionId,
+        reply: INSUFFICIENT_DATA_FRIENDLY_MESSAGE,
+        groundedCompetitors: activeComps.map((c) => ({
+          id: c.id,
+          name: c.name,
+          domain: c.domain,
+          planCount: 0,
+          featureCount: 0,
+          changeCount: 0,
+        })),
+        classification: "INSUFFICIENT_DATA",
       });
     }
 
@@ -180,8 +242,9 @@ ${summaryText}
         changeCount: c.recentChanges.length,
       })),
     });
-  } catch (err: any) {
+  } catch (err: unknown) {
     console.error("Error in insights chat route:", err);
-    return errorResponse(err?.message || "Internal server error during chat processing", "INTERNAL_ERROR", 500);
+    const normalized = normalizeChatError(err);
+    return errorResponse(normalized.friendlyMessage, normalized.code, normalized.statusCode);
   }
 }
