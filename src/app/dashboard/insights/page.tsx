@@ -6,20 +6,16 @@ import {
   User,
   Send,
   Sparkles,
-  Building2,
-  Check,
+  ChevronDown,
   RefreshCw,
-  ShieldCheck,
   Plus,
   History,
   Trash2,
-  Clock,
-  Layers,
-  ChevronRight,
   MessageSquare,
+  Building2,
+  Check,
 } from "lucide-react";
 import { Card } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { ConfirmDeleteAlert } from "@/components/ui/confirm-delete-alert";
 import { FormattedChatContent } from "@/components/ui/formatted-chat-content";
@@ -54,16 +50,15 @@ interface ChatSessionItem {
 }
 
 const SAMPLE_PROMPTS = [
-  "Compare ChatGPT Plus vs Claude Pro: pricing, limits, and core features.",
-  "What are Gemini's available subscription tiers in India and their limits?",
-  "Which competitors offer custom enterprise tiers and what are their features?",
-  "Summarize all recent pricing changes detected across our tracked competitors.",
-  "Which tool gives the highest usage limits for under $30/month?",
+  "Compare pricing, billing intervals, and limits across all active competitors.",
+  "Which plan gives the highest usage limits and features?",
+  "What recent pricing or packaging changes were detected?",
+  "What are Claude's pricing tiers and quotas?",
 ];
 
 export default function InsightsChatbotPage() {
   const [competitorsList, setCompetitorsList] = useState<CompetitorOption[]>([]);
-  const [selectedCompetitorIds, setSelectedCompetitorIds] = useState<string[]>(["all"]);
+  const [selectedCompetitorId, setSelectedCompetitorId] = useState<string>("all");
   const [sessions, setSessions] = useState<ChatSessionItem[]>([]);
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -73,11 +68,27 @@ export default function InsightsChatbotPage() {
   const [sessionToDelete, setSessionToDelete] = useState<ChatSessionItem | null>(null);
   const [isDeletingSession, setIsDeletingSession] = useState(false);
 
-  const messagesEndRef = useRef<HTMLDivElement>(null);
+  const messagesContainerRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
+  const userHasScrolledUpRef = useRef<boolean>(false);
 
-  const scrollToBottom = () => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  // Auto-scroll logic: only auto-scroll if user has not scrolled up to read older messages
+  const scrollToBottom = (force = false) => {
+    if (!messagesContainerRef.current) return;
+    if (force || !userHasScrolledUpRef.current) {
+      messagesContainerRef.current.scrollTo({
+        top: messagesContainerRef.current.scrollHeight,
+        behavior: "smooth",
+      });
+    }
+  };
+
+  const handleMessagesScroll = () => {
+    if (!messagesContainerRef.current) return;
+    const { scrollTop, scrollHeight, clientHeight } = messagesContainerRef.current;
+    const distanceFromBottom = scrollHeight - scrollTop - clientHeight;
+    // If user is more than 80px away from bottom, mark as scrolled up
+    userHasScrolledUpRef.current = distanceFromBottom > 80;
   };
 
   useEffect(() => {
@@ -92,7 +103,7 @@ export default function InsightsChatbotPage() {
         const compRes = await fetch("/api/competitors");
         const compJson = await compRes.json();
         if (compJson.success && Array.isArray(compJson.data)) {
-          const comps = compJson.data.map((c: any) => ({
+          const comps: CompetitorOption[] = compJson.data.map((c: any) => ({
             id: c.id,
             name: c.name,
             domain: c.domain,
@@ -108,7 +119,6 @@ export default function InsightsChatbotPage() {
         if (sessJson.success && Array.isArray(sessJson.data?.sessions)) {
           setSessions(sessJson.data.sessions);
           if (sessJson.data.sessions.length > 0) {
-            // Load the most recent session
             loadSessionMessages(sessJson.data.sessions[0].id);
             return;
           }
@@ -127,6 +137,7 @@ export default function InsightsChatbotPage() {
   const loadSessionMessages = async (sessionId: string) => {
     setActiveSessionId(sessionId);
     setIsLoading(true);
+    userHasScrolledUpRef.current = false;
     try {
       const res = await fetch(`/api/insights/sessions/${sessionId}`);
       const json = await res.json();
@@ -135,7 +146,8 @@ export default function InsightsChatbotPage() {
 
         // Restore active competitor scope from session
         if (Array.isArray(session.selectedCompetitors) && session.selectedCompetitors.length > 0) {
-          setSelectedCompetitorIds(session.selectedCompetitors);
+          const first = session.selectedCompetitors[0];
+          setSelectedCompetitorId(first === "all" ? "all" : first);
         }
 
         // Map messages
@@ -151,6 +163,7 @@ export default function InsightsChatbotPage() {
         }));
 
         setMessages(formatted);
+        setTimeout(() => scrollToBottom(true), 50);
       }
     } catch (err) {
       console.error("Failed to load session messages:", err);
@@ -159,35 +172,41 @@ export default function InsightsChatbotPage() {
     }
   };
 
-  // Start fresh chat session
+  // Start a fresh analysis session
   const startNewChatSession = () => {
     setActiveSessionId(null);
-    setMessages([
-      {
-        id: "welcome-msg",
-        role: "assistant",
-        content: `👋 **Welcome to RivalScope Intelligence Assistant!**\n\nI have real-time access to your verified competitor database (plans, pricing, feature snapshots, usage limits, and recent pricing shifts). \n\nYou can select **any individual competitor, multiple competitors, or all competitors** above to focus the query. Ask me anything about their pricing strategy, feature tiers, or differences!`,
-        timestamp: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
-      },
-    ]);
+    userHasScrolledUpRef.current = false;
+    const initialGreeting: ChatMessage = {
+      id: "welcome-msg",
+      role: "assistant",
+      content:
+        "Hello! I am ready to assist with your competitive intelligence queries.\n\nAsk about pricing tiers, packaging models, feature entitlements, quotas, or recent historical changes across your tracked competitors.",
+      timestamp: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+    };
+    setMessages([initialGreeting]);
+    setTimeout(() => {
+      inputRef.current?.focus();
+      scrollToBottom(true);
+    }, 50);
   };
 
-  // Prompt delete chat session alert
-  const promptDeleteSession = (e: React.MouseEvent, session: ChatSessionItem) => {
+  // Prompt confirmation to delete session
+  const promptDeleteSession = (e: React.MouseEvent, sess: ChatSessionItem) => {
     e.stopPropagation();
-    setSessionToDelete(session);
+    setSessionToDelete(sess);
   };
 
-  // Confirmed delete execution
   const executeDeleteSession = async () => {
     if (!sessionToDelete) return;
     setIsDeletingSession(true);
-
     try {
-      await fetch(`/api/insights/sessions/${sessionToDelete.id}`, { method: "DELETE" });
-      const remaining = sessions.filter((s) => s.id !== sessionToDelete.id);
-      setSessions(remaining);
-      if (activeSessionId === sessionToDelete.id) {
+      const res = await fetch(`/api/insights/sessions/${sessionToDelete.id}`, {
+        method: "DELETE",
+      });
+      const json = await res.json();
+      if (json.success) {
+        const remaining = sessions.filter((s) => s.id !== sessionToDelete.id);
+        setSessions(remaining);
         if (remaining.length > 0) {
           loadSessionMessages(remaining[0].id);
         } else {
@@ -202,36 +221,16 @@ export default function InsightsChatbotPage() {
     }
   };
 
-  // Competitor selection toggles
-  const handleSelectAll = () => {
-    setSelectedCompetitorIds(["all"]);
-  };
-
-  const toggleCompetitor = (id: string) => {
-    if (selectedCompetitorIds.includes("all")) {
-      setSelectedCompetitorIds([id]);
-      return;
-    }
-
-    if (selectedCompetitorIds.includes(id)) {
-      const remaining = selectedCompetitorIds.filter((cId) => cId !== id);
-      if (remaining.length === 0) {
-        setSelectedCompetitorIds(["all"]);
-      } else {
-        setSelectedCompetitorIds(remaining);
-      }
-    } else {
-      setSelectedCompetitorIds([...selectedCompetitorIds, id]);
-    }
-  };
-
-  const isSelected = (id: string) => selectedCompetitorIds.includes(id);
-  const isAllSelected = selectedCompetitorIds.includes("all");
+  // Calculate competitor option labels for dropdown
+  const totalCompetitorsCount = competitorsList.length;
+  const currentCompetitor = competitorsList.find((c) => c.id === selectedCompetitorId);
 
   // Send message
   const handleSendMessage = async (textToSend?: string) => {
     const text = (textToSend || inputValue).trim();
     if (!text || isLoading) return;
+
+    userHasScrolledUpRef.current = false;
 
     const userMsgId = `user-${Date.now()}`;
     const userMsg: ChatMessage = {
@@ -244,6 +243,7 @@ export default function InsightsChatbotPage() {
     setMessages((prev) => [...prev, userMsg]);
     setInputValue("");
     setIsLoading(true);
+    setTimeout(() => scrollToBottom(true), 20);
 
     try {
       const conversationHistory = [...messages, userMsg].map((m) => ({
@@ -251,13 +251,15 @@ export default function InsightsChatbotPage() {
         content: m.content,
       }));
 
+      const targetCompetitorIds = selectedCompetitorId === "all" ? ["all"] : [selectedCompetitorId];
+
       const res = await fetch("/api/insights/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           sessionId: activeSessionId || undefined,
           messages: conversationHistory,
-          competitorIds: isAllSelected ? ["all"] : selectedCompetitorIds,
+          competitorIds: targetCompetitorIds,
         }),
       });
 
@@ -288,8 +290,8 @@ export default function InsightsChatbotPage() {
       };
 
       setMessages((prev) => [...prev, botMsg]);
+      setTimeout(() => scrollToBottom(true), 20);
     } catch (err: unknown) {
-      // Safe error normalization: prevents [object Object] leaks and presents friendly assistant bubble
       const normalized = normalizeChatError(err);
       const errorMsg: ChatMessage = {
         id: `err-${Date.now()}`,
@@ -298,6 +300,7 @@ export default function InsightsChatbotPage() {
         timestamp: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
       };
       setMessages((prev) => [...prev, errorMsg]);
+      setTimeout(() => scrollToBottom(true), 20);
     } finally {
       setIsLoading(false);
       setTimeout(() => inputRef.current?.focus(), 100);
@@ -311,188 +314,112 @@ export default function InsightsChatbotPage() {
     }
   };
 
-  const activeSelectionLabel = isAllSelected
-    ? `All Tracked Competitors (${competitorsList.length})`
-    : `${selectedCompetitorIds.length} Competitor${selectedCompetitorIds.length > 1 ? "s" : ""} Selected`;
-
   return (
-    <div className="flex h-[calc(100vh-80px)] max-w-7xl mx-auto gap-4">
-      {/* Left Sidebar: Session History */}
-      <div
-        className={`${
-          historySidebarOpen ? "w-64" : "w-12"
-        } transition-all duration-200 bg-white rounded-xl border border-slate-200/80 shadow-xs flex flex-col shrink-0 overflow-hidden`}
-      >
-        <div className="p-3 border-b border-slate-100 flex items-center justify-between">
-          {historySidebarOpen ? (
-            <>
-              <div className="flex items-center gap-1.5 font-bold text-xs text-slate-800">
-                <History className="h-4 w-4 text-indigo-600" />
-                <span>Chat History</span>
-              </div>
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={() => setHistorySidebarOpen(false)}
-                className="h-7 w-7 p-0 text-slate-400 hover:text-slate-600"
-                title="Collapse sidebar"
+    <div className="flex-1 flex flex-col min-h-0 h-full overflow-hidden">
+      {/* Compact Header */}
+      <div className="shrink-0 pb-3 flex items-center justify-between">
+        <h1 className="text-xl font-bold text-slate-900 tracking-tight">AI Insights</h1>
+      </div>
+
+      {/* Main Workspace: History Sidebar + Chat Panel */}
+      <div className="flex-1 flex min-h-0 gap-3 sm:gap-4 overflow-hidden">
+        {/* Left Sidebar: Session History */}
+        <div
+          className={`${
+            historySidebarOpen ? "w-60 lg:w-64" : "w-11"
+          } transition-all duration-200 bg-white rounded-xl border border-slate-200/90 shadow-2xs flex flex-col shrink-0 min-h-0 overflow-hidden`}
+        >
+          <div className="p-2.5 border-b border-slate-100 flex items-center justify-between shrink-0">
+            {historySidebarOpen ? (
+              <>
+                <div className="flex items-center gap-1.5 font-semibold text-xs text-slate-700">
+                  <History className="h-3.5 w-3.5 text-indigo-600" />
+                  <span>Chat History</span>
+                </div>
+                <button
+                  onClick={() => setHistorySidebarOpen(false)}
+                  className="h-6 w-6 rounded-md flex items-center justify-center text-slate-400 hover:text-slate-600 hover:bg-slate-100 text-xs transition-colors"
+                  title="Collapse history"
+                >
+                  ✕
+                </button>
+              </>
+            ) : (
+              <button
+                onClick={() => setHistorySidebarOpen(true)}
+                className="h-6 w-6 mx-auto rounded-md flex items-center justify-center text-slate-500 hover:text-slate-800 hover:bg-slate-100 transition-colors"
+                title="Expand history"
               >
-                ✕
-              </Button>
+                <History className="h-3.5 w-3.5" />
+              </button>
+            )}
+          </div>
+
+          {historySidebarOpen && (
+            <>
+              {/* New Analysis Button in History Panel */}
+              <div className="p-2 shrink-0">
+                <Button
+                  onClick={startNewChatSession}
+                  size="sm"
+                  className="w-full bg-slate-900 hover:bg-slate-800 text-white justify-start gap-1.5 text-xs font-medium h-8 shadow-xs"
+                >
+                  <Plus className="h-3.5 w-3.5" />
+                  <span>New Analysis</span>
+                </Button>
+              </div>
+
+              {/* Past Sessions List with Independent Vertical Scrolling */}
+              <div className="flex-1 overflow-y-auto min-h-0 p-2 space-y-1">
+                {sessions.length === 0 ? (
+                  <div className="text-center py-8 text-xs text-slate-400">
+                    No previous sessions yet
+                  </div>
+                ) : (
+                  sessions.map((sess) => {
+                    const isActive = activeSessionId === sess.id;
+                    return (
+                      <div
+                        key={sess.id}
+                        onClick={() => loadSessionMessages(sess.id)}
+                        className={`group flex items-center justify-between px-2.5 py-2 rounded-lg text-xs cursor-pointer transition-colors ${
+                          isActive
+                            ? "bg-indigo-600 text-white font-medium shadow-2xs"
+                            : "text-slate-700 hover:bg-slate-100"
+                        }`}
+                      >
+                        <div className="flex items-center gap-2 min-w-0 flex-1 mr-1">
+                          <MessageSquare
+                            className={`h-3.5 w-3.5 shrink-0 ${isActive ? "text-white" : "text-slate-400"}`}
+                          />
+                          <span className="truncate">{sess.title}</span>
+                        </div>
+                        <button
+                          onClick={(e) => promptDeleteSession(e, sess)}
+                          className={`opacity-0 group-hover:opacity-100 p-1 rounded-md hover:text-rose-500 transition-all ${
+                            isActive ? "text-white/80 hover:text-white" : "text-slate-400"
+                          }`}
+                          title="Delete session"
+                        >
+                          <Trash2 className="h-3 w-3" />
+                        </button>
+                      </div>
+                    );
+                  })
+                )}
+              </div>
             </>
-          ) : (
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() => setHistorySidebarOpen(true)}
-              className="h-7 w-7 p-0 mx-auto text-slate-500 hover:text-slate-700"
-              title="Expand history"
-            >
-              <History className="h-4 w-4" />
-            </Button>
           )}
         </div>
 
-        {historySidebarOpen && (
-          <>
-            {/* New Chat Button */}
-            <div className="p-2.5">
-              <Button
-                onClick={startNewChatSession}
-                size="sm"
-                className="w-full bg-indigo-50 text-indigo-700 hover:bg-indigo-100 border border-indigo-200 justify-start gap-1.5 text-xs font-semibold h-8"
-              >
-                <Plus className="h-3.5 w-3.5" />
-                <span>New Analysis</span>
-              </Button>
-            </div>
-
-            {/* Past Sessions List */}
-            <div className="flex-1 overflow-y-auto p-2 space-y-1">
-              {sessions.length === 0 ? (
-                <div className="text-center py-8 text-xs text-slate-400">
-                  No previous sessions yet
-                </div>
-              ) : (
-                sessions.map((sess) => {
-                  const isActive = activeSessionId === sess.id;
-                  return (
-                    <div
-                      key={sess.id}
-                      onClick={() => loadSessionMessages(sess.id)}
-                      className={`group flex items-center justify-between p-2 rounded-lg text-xs cursor-pointer transition-all ${
-                        isActive
-                          ? "bg-indigo-600 text-white font-medium shadow-xs"
-                          : "text-slate-700 hover:bg-slate-100"
-                      }`}
-                    >
-                      <div className="flex items-center gap-2 truncate">
-                        <MessageSquare className={`h-3.5 w-3.5 shrink-0 ${isActive ? "text-white" : "text-slate-400"}`} />
-                        <span className="truncate">{sess.title}</span>
-                      </div>
-                      <button
-                        onClick={(e) => promptDeleteSession(e, sess)}
-                        className={`opacity-0 group-hover:opacity-100 p-1 hover:text-rose-500 transition-opacity ${
-                          isActive ? "text-white/80 hover:text-white" : "text-slate-400"
-                        }`}
-                        title="Delete session"
-                      >
-                        <Trash2 className="h-3 w-3" />
-                      </button>
-                    </div>
-                  );
-                })
-              )}
-            </div>
-          </>
-        )}
-      </div>
-
-      {/* Main Right Area: Chat & Competitor Selector */}
-      <div className="flex-1 flex flex-col min-w-0 space-y-3">
-        {/* Top Scope & Controls Header */}
-        <div className="bg-white rounded-xl border border-slate-200/80 p-3.5 shadow-xs shrink-0">
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <div className="flex items-center gap-3">
-              <div className="h-9 w-9 rounded-xl bg-indigo-600/10 flex items-center justify-center text-indigo-600">
-                <Bot className="h-5 w-5" />
-              </div>
-              <div>
-                <div className="flex items-center gap-2">
-                  <h1 className="text-base font-bold text-slate-900 tracking-tight">
-                    Strategic Intelligence Assistant
-                  </h1>
-                  <Badge variant="outline" className="bg-emerald-50 text-emerald-700 border-emerald-200 gap-1 text-[10px] py-0">
-                    <ShieldCheck className="h-3 w-3" /> Grounded in Database
-                  </Badge>
-                </div>
-                <p className="text-[11px] text-slate-500">
-                  Real-time competitive analysis with structured, source-verified replies.
-                </p>
-              </div>
-            </div>
-
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={startNewChatSession}
-              className="text-xs h-8 gap-1.5"
-            >
-              <Plus className="h-3.5 w-3.5" />
-              <span>New Analysis</span>
-            </Button>
-          </div>
-
-          {/* Competitor Filter Bar */}
-          <div className="mt-2.5 pt-2.5 border-t border-slate-100 flex flex-wrap items-center gap-1.5">
-            <span className="text-xs font-semibold text-slate-700 flex items-center gap-1 mr-1">
-              <Building2 className="h-3.5 w-3.5 text-indigo-600" />
-              Target Competitors:
-            </span>
-
-            {/* Select All */}
-            <button
-              onClick={handleSelectAll}
-              className={`px-2.5 py-1 rounded-lg text-xs font-medium transition-all flex items-center gap-1 ${
-                isAllSelected
-                  ? "bg-indigo-600 text-white shadow-xs"
-                  : "bg-slate-100 text-slate-700 hover:bg-slate-200"
-              }`}
-            >
-              {isAllSelected && <Check className="h-3 w-3" />}
-              All ({competitorsList.length})
-            </button>
-
-            {/* Individual Pills */}
-            {competitorsList.map((c) => {
-              const active = isSelected(c.id) && !isAllSelected;
-              return (
-                <button
-                  key={c.id}
-                  onClick={() => toggleCompetitor(c.id)}
-                  className={`px-2.5 py-1 rounded-lg text-xs font-medium transition-all flex items-center gap-1 ${
-                    active
-                      ? "bg-indigo-600 text-white shadow-xs"
-                      : "bg-slate-100 text-slate-700 hover:bg-slate-200"
-                  }`}
-                >
-                  {active && <Check className="h-3 w-3" />}
-                  <span>{c.name}</span>
-                  {c.activePlanCount !== undefined && c.activePlanCount > 0 && (
-                    <span className={`text-[10px] px-1.5 py-0.2 rounded-full ${active ? "bg-white/20 text-white" : "bg-slate-200 text-slate-600"}`}>
-                      {c.activePlanCount}
-                    </span>
-                  )}
-                </button>
-              );
-            })}
-          </div>
-        </div>
-
-        {/* Chat Stream & Input Card */}
-        <Card className="flex-1 flex flex-col border border-slate-200/80 shadow-xs overflow-hidden">
-          {/* Messages Scroll View */}
-          <div className="flex-1 overflow-y-auto p-4 sm:p-5 space-y-4">
+        {/* Main Chat Panel: Full Height, Message Area Scrolls, Composer Fixed at Bottom */}
+        <Card className="flex-1 flex flex-col min-h-0 min-w-0 bg-white border border-slate-200/90 shadow-2xs rounded-xl overflow-hidden">
+          {/* Conversation Messages Container: Independent Scroll Area */}
+          <div
+            ref={messagesContainerRef}
+            onScroll={handleMessagesScroll}
+            className="flex-1 overflow-y-auto min-h-0 p-4 sm:p-6 space-y-4"
+          >
             {messages.map((msg) => (
               <div
                 key={msg.id}
@@ -500,12 +427,12 @@ export default function InsightsChatbotPage() {
                   msg.role === "user" ? "flex-row-reverse" : "flex-row"
                 }`}
               >
-                {/* Avatar Icon */}
+                {/* Role Icon */}
                 <div
-                  className={`h-7 w-7 rounded-lg shrink-0 flex items-center justify-center ${
+                  className={`h-7 w-7 rounded-lg shrink-0 flex items-center justify-center text-xs font-semibold shadow-2xs ${
                     msg.role === "user"
                       ? "bg-slate-900 text-white"
-                      : "bg-indigo-600 text-white shadow-xs"
+                      : "bg-indigo-600 text-white"
                   }`}
                 >
                   {msg.role === "user" ? (
@@ -517,21 +444,22 @@ export default function InsightsChatbotPage() {
 
                 {/* Message Bubble */}
                 <div
-                  className={`max-w-[85%] sm:max-w-[78%] rounded-2xl p-4 text-xs sm:text-sm leading-relaxed ${
+                  className={`max-w-[85%] sm:max-w-[80%] rounded-2xl p-4 text-xs sm:text-sm leading-relaxed ${
                     msg.role === "user"
                       ? "bg-slate-900 text-white rounded-tr-none"
-                      : "bg-slate-50 border border-slate-200/90 text-slate-800 rounded-tl-none shadow-2xs"
+                      : "bg-slate-50/80 border border-slate-200/90 text-slate-800 rounded-tl-none shadow-2xs"
                   }`}
                 >
                   <FormattedChatContent content={msg.content} isUser={msg.role === "user"} />
 
+                  {/* Grounded Database Badges for Assistant */}
                   {msg.groundedCompetitors && msg.groundedCompetitors.length > 0 && (
                     <div className="mt-3 pt-2.5 border-t border-slate-200/60 flex flex-wrap items-center gap-1.5 text-[11px] text-slate-500">
-                      <span className="font-medium text-slate-400">Verified database ground truth:</span>
+                      <span className="font-medium text-slate-400">Database ground truth:</span>
                       {msg.groundedCompetitors.map((gc) => (
                         <span
                           key={gc.id}
-                          className="px-2 py-0.5 rounded-md bg-white border border-slate-200 font-semibold text-slate-700"
+                          className="px-2 py-0.5 rounded-md bg-white border border-slate-200 font-semibold text-slate-700 text-[11px]"
                         >
                           {gc.name}
                         </span>
@@ -552,31 +480,29 @@ export default function InsightsChatbotPage() {
 
             {isLoading && (
               <div className="flex items-start gap-3">
-                <div className="h-7 w-7 rounded-lg bg-indigo-600 text-white shrink-0 flex items-center justify-center shadow-xs">
+                <div className="h-7 w-7 rounded-lg bg-indigo-600 text-white shrink-0 flex items-center justify-center shadow-2xs">
                   <Bot className="h-3.5 w-3.5" />
                 </div>
-                <div className="bg-slate-50 border border-slate-200 rounded-2xl rounded-tl-none p-4 text-xs text-slate-600 flex items-center gap-2">
-                  <RefreshCw className="h-4 w-4 animate-spin text-indigo-600" />
-                  <span>Synthesizing verified competitive data from database...</span>
+                <div className="bg-slate-50 border border-slate-200 rounded-2xl rounded-tl-none p-3.5 text-xs text-slate-600 flex items-center gap-2">
+                  <RefreshCw className="h-3.5 w-3.5 animate-spin text-indigo-600" />
+                  <span>Analyzing competitive database records...</span>
                 </div>
               </div>
             )}
-
-            <div ref={messagesEndRef} />
           </div>
 
-          {/* Suggested Prompts Pill Bar */}
+          {/* Quick Prompts Bar (when conversation is fresh) */}
           {messages.length <= 2 && (
-            <div className="px-4 py-2 border-t border-slate-100 bg-slate-50/50">
+            <div className="px-4 py-2 border-t border-slate-100 bg-slate-50/60 shrink-0">
               <span className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider block mb-1">
-                Suggested Analysis Prompts:
+                Suggested Analysis Prompts
               </span>
               <div className="flex flex-wrap gap-1.5">
                 {SAMPLE_PROMPTS.map((prompt, idx) => (
                   <button
                     key={idx}
                     onClick={() => handleSendMessage(prompt)}
-                    className="px-2.5 py-1 rounded-md bg-white hover:bg-slate-100 border border-slate-200 text-slate-700 text-xs text-left transition-colors flex items-center gap-1"
+                    className="px-2.5 py-1 rounded-md bg-white hover:bg-slate-100 border border-slate-200 text-slate-700 text-xs text-left transition-colors flex items-center gap-1 shadow-2xs"
                   >
                     <Sparkles className="h-3 w-3 text-indigo-500 shrink-0" />
                     <span>{prompt}</span>
@@ -586,34 +512,75 @@ export default function InsightsChatbotPage() {
             </div>
           )}
 
-          {/* Input Bar */}
-          <div className="p-3 sm:p-4 border-t border-slate-200 bg-white">
-            <div className="relative flex items-end gap-2 bg-slate-50 border border-slate-200 rounded-xl p-2 focus-within:ring-2 focus-within:ring-indigo-500 focus-within:bg-white transition-all">
+          {/* Chat Composer: Integrated Competitor Dropdown + Textarea + Send Button */}
+          <div className="p-3 sm:p-4 border-t border-slate-200 bg-white shrink-0">
+            <div className="flex flex-col sm:flex-row items-stretch sm:items-end gap-2 bg-slate-50 border border-slate-200 rounded-xl p-2 focus-within:ring-2 focus-within:ring-indigo-500 focus-within:bg-white transition-all">
+              {/* Dynamic Competitor Scope Dropdown */}
+              <div className="relative shrink-0 sm:self-center">
+                <div className="relative">
+                  <select
+                    value={selectedCompetitorId}
+                    onChange={(e) => setSelectedCompetitorId(e.target.value)}
+                    aria-label="Select target competitor"
+                    className="w-full sm:w-auto appearance-none bg-white border border-slate-200 text-slate-800 text-xs font-medium rounded-lg pl-3 pr-8 py-2 hover:bg-slate-50 focus:outline-hidden focus:ring-1 focus:ring-indigo-500 cursor-pointer shadow-2xs transition-colors"
+                  >
+                    <option value="all">
+                      All Competitors ({totalCompetitorsCount})
+                    </option>
+                    {competitorsList.map((c) => (
+                      <option key={c.id} value={c.id}>
+                        {c.name} ({c.activePlanCount ?? 0})
+                      </option>
+                    ))}
+                  </select>
+                  <ChevronDown className="h-3.5 w-3.5 text-slate-400 absolute right-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+                </div>
+              </div>
+
+              {/* Textarea Input */}
               <textarea
                 ref={inputRef}
-                rows={2}
+                rows={1}
                 value={inputValue}
                 onChange={(e) => setInputValue(e.target.value)}
                 onKeyDown={handleKeyDown}
-                placeholder={`Ask a question grounded in ${activeSelectionLabel}... (Press Enter to send, Shift+Enter for newline)`}
-                className="flex-1 bg-transparent border-0 resize-none text-xs sm:text-sm text-slate-900 placeholder:text-slate-400 focus:outline-hidden px-2 py-1 leading-relaxed max-h-32"
+                placeholder={
+                  selectedCompetitorId === "all"
+                    ? "Ask a question about your competitors... (Enter to send, Shift+Enter for newline)"
+                    : `Ask about ${currentCompetitor?.name || "this competitor"}... (Enter to send, Shift+Enter for newline)`
+                }
+                className="flex-1 bg-transparent border-0 resize-none text-xs sm:text-sm text-slate-900 placeholder:text-slate-400 focus:outline-hidden px-2 py-1.5 leading-relaxed min-h-[38px] max-h-32"
               />
+
+              {/* Send Button */}
               <Button
                 size="sm"
                 onClick={() => handleSendMessage()}
                 disabled={!inputValue.trim() || isLoading}
-                className="bg-indigo-600 hover:bg-indigo-700 text-white shrink-0 h-9 px-3.5 rounded-lg transition-all"
+                className="bg-indigo-600 hover:bg-indigo-700 text-white shrink-0 h-9 px-4 rounded-lg font-medium shadow-2xs transition-all"
               >
                 {isLoading ? (
                   <RefreshCw className="h-4 w-4 animate-spin" />
                 ) : (
-                  <Send className="h-4 w-4" />
+                  <div className="flex items-center gap-1.5">
+                    <span>Send</span>
+                    <Send className="h-3.5 w-3.5" />
+                  </div>
                 )}
               </Button>
             </div>
-            <div className="mt-1 flex items-center justify-between text-[10px] text-slate-400 px-1">
-              <span>All conversations and comparisons are automatically saved to database history</span>
-              <span>Target: <strong className="text-slate-600">{activeSelectionLabel}</strong></span>
+
+            {/* Subtle Status Line */}
+            <div className="mt-1.5 flex items-center justify-between text-[11px] text-slate-400 px-1">
+              <span>Conversations are persisted to database</span>
+              <span>
+                Target:{" "}
+                <strong className="text-slate-600 font-medium">
+                  {selectedCompetitorId === "all"
+                    ? `All Competitors (${totalCompetitorsCount})`
+                    : `${currentCompetitor?.name || "Competitor"} (${currentCompetitor?.activePlanCount ?? 0} plans)`}
+                </strong>
+              </span>
             </div>
           </div>
         </Card>

@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useState } from "react";
+import { usePathname } from "next/navigation";
 import { Sidebar } from "@/components/layout/sidebar";
 import { Header } from "@/components/layout/header";
 import { AddCompetitorModal } from "@/components/competitors/add-competitor-modal";
@@ -9,11 +10,13 @@ import { X } from "lucide-react";
 export function DashboardShell({ children }: { children: React.ReactNode }) {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
+  const pathname = usePathname();
+  const isInsightsPage = pathname === "/dashboard/insights";
 
   return (
-    <div className="min-h-screen flex bg-slate-50 text-slate-900">
+    <div className="h-screen h-[100dvh] flex bg-slate-50 text-slate-900 overflow-hidden">
       {/* Desktop Sidebar */}
-      <div className="hidden md:block">
+      <div className="hidden md:block shrink-0">
         <Sidebar />
       </div>
 
@@ -38,12 +41,18 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
       )}
 
       {/* Main Content Area */}
-      <div className="flex-1 flex flex-col min-w-0">
+      <div className="flex-1 flex flex-col min-w-0 min-h-0 overflow-hidden">
         <Header
           onAddCompetitorClick={() => setIsModalOpen(true)}
           onMobileMenuToggle={() => setIsMobileMenuOpen(true)}
         />
-        <main className="flex-1 p-4 sm:p-6 lg:p-8 max-w-7xl mx-auto w-full">
+        <main
+          className={`flex-1 min-w-0 min-h-0 w-full ${
+            isInsightsPage
+              ? "p-3 sm:p-4 overflow-hidden flex flex-col"
+              : "p-4 sm:p-6 lg:p-8 max-w-7xl mx-auto overflow-y-auto"
+          }`}
+        >
           {children}
         </main>
       </div>
