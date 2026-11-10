@@ -22,6 +22,7 @@ import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { ConfirmDeleteAlert } from "@/components/ui/confirm-delete-alert";
+import { FormattedChatContent } from "@/components/ui/formatted-chat-content";
 
 interface CompetitorOption {
   id: string;
@@ -518,9 +519,7 @@ export default function InsightsChatbotPage() {
                       : "bg-slate-50 border border-slate-200/90 text-slate-800 rounded-tl-none shadow-2xs"
                   }`}
                 >
-                  <div className="whitespace-pre-wrap space-y-2">
-                    {msg.content}
-                  </div>
+                  <FormattedChatContent content={msg.content} isUser={msg.role === "user"} />
 
                   {msg.groundedCompetitors && msg.groundedCompetitors.length > 0 && (
                     <div className="mt-3 pt-2.5 border-t border-slate-200/60 flex flex-wrap items-center gap-1.5 text-[11px] text-slate-500">

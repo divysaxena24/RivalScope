@@ -100,6 +100,16 @@ export async function buildChatbotCompetitorContext(
       .orderBy(desc(pricingChanges.detectedAt))
       .limit(10);
 
+    // Deduplicate active plans by normalized name, billing period and price to prevent duplicate rows
+    const uniquePlansMap = new Map<string, typeof plans[0]>();
+    for (const p of plans) {
+      const normKey = `${p.planName.trim().toLowerCase()}::${p.billingPeriod || "monthly"}::${p.price || "custom"}`;
+      if (!uniquePlansMap.has(normKey)) {
+        uniquePlansMap.set(normKey, p);
+      }
+    }
+    const deduplicatedPlans = Array.from(uniquePlansMap.values());
+
     result.push({
       id: comp.id,
       name: comp.name,
@@ -107,7 +117,7 @@ export async function buildChatbotCompetitorContext(
       website: comp.website,
       industry: comp.industry,
       description: comp.description,
-      plans: plans.map((p) => ({
+      plans: deduplicatedPlans.map((p) => ({
         id: p.id,
         planName: p.planName,
         price: p.price,
@@ -128,10 +138,22 @@ export async function buildChatbotCompetitorContext(
   for (const c of result) {
     const plansSummary = c.plans.length > 0
       ? c.plans
-          .map(
-            (p) =>
-              `- Plan: "${p.planName}" | Price: ${p.isCustomPricing ? "Custom/Enterprise" : p.price ? `${p.currency || "$"}${p.price}/${p.billingPeriod || "mo"}` : "Free"} | Usage Limits: ${JSON.stringify(p.usageLimits)}`
-          )
+          .map((p) => {
+            const priceFormatted = p.isCustomPricing
+              ? "Custom/Enterprise"
+              : p.price
+              ? `${p.currency || "$"}${p.price}/${p.billingPeriod || "month"}`
+              : "$0.00 Free";
+            const limitsFormatted =
+              p.usageLimits && Object.keys(p.usageLimits).length > 0
+                ? JSON.stringify(p.usageLimits)
+                : "Not specified in database records";
+            const featuresList =
+              p.features && p.features.length > 0
+                ? p.features.slice(0, 5).join(", ")
+                : "Standard entitlements";
+            return `- Plan: "${p.planName}" | Price: ${priceFormatted} | Billing: ${p.billingPeriod || "monthly"} | Usage Limits: ${limitsFormatted} | Highlights: ${featuresList}`;
+          })
           .join("\n")
       : "No active plans recorded yet.";
 
