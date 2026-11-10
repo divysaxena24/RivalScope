@@ -535,12 +535,9 @@ export default function CompetitorDetailPage({
           <span className="text-2xl font-bold text-slate-900 mt-1 block">
             {totalChanges}
           </span>
-          <Link
-            href={`/dashboard/changes?competitorId=${competitor.id}`}
-            className="text-[11px] text-indigo-600 font-semibold hover:underline mt-0.5 block"
-          >
-            View change history →
-          </Link>
+          <span className="text-[11px] text-slate-400 mt-0.5 block">
+            Tracked price variations
+          </span>
         </Card>
       </div>
 
@@ -829,12 +826,6 @@ export default function CompetitorDetailPage({
                 Deterministic price & feature diffs
               </CardDescription>
             </div>
-            <Link
-              href={`/dashboard/changes?competitorId=${competitor.id}`}
-              className="text-xs font-semibold text-indigo-600 hover:text-indigo-800"
-            >
-              View all
-            </Link>
           </CardHeader>
           <CardContent className="p-4 space-y-2.5">
             {changes.length === 0 ? (

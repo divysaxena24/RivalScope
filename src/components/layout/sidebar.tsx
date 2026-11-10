@@ -9,7 +9,6 @@ import {
   GitCompare,
   TrendingUp,
   Sparkles,
-  History,
   Settings,
   Radar,
   Loader2,
@@ -42,11 +41,6 @@ const navigationItems = [
     name: "AI Insights",
     href: "/dashboard/insights",
     icon: Sparkles,
-  },
-  {
-    name: "Change Log",
-    href: "/dashboard/changes",
-    icon: History,
   },
 ];
 

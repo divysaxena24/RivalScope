@@ -13,7 +13,6 @@ const pageTitles: Record<string, string> = {
   "/dashboard/comparison": "Competitor Comparison",
   "/dashboard/price-history": "Price History",
   "/dashboard/insights": "AI Insights",
-  "/dashboard/changes": "Change Log",
 };
 
 interface HeaderProps {

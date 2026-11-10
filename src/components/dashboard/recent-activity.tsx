@@ -51,12 +51,6 @@ export function RecentActivity() {
             Latest price variations and detected packaging updates
           </CardDescription>
         </div>
-        <Link
-          href="/dashboard/changes"
-          className="text-xs font-semibold text-indigo-600 hover:text-indigo-800"
-        >
-          View all
-        </Link>
       </CardHeader>
       <CardContent className="space-y-3">
         {isLoading ? (
