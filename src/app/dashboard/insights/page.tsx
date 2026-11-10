@@ -544,11 +544,7 @@ export default function InsightsChatbotPage() {
                 value={inputValue}
                 onChange={(e) => setInputValue(e.target.value)}
                 onKeyDown={handleKeyDown}
-                placeholder={
-                  selectedCompetitorId === "all"
-                    ? "Ask a question about your competitors... (Enter to send, Shift+Enter for newline)"
-                    : `Ask about ${currentCompetitor?.name || "this competitor"}... (Enter to send, Shift+Enter for newline)`
-                }
+                placeholder="Ask a question"
                 className="flex-1 bg-transparent border-0 resize-none text-xs sm:text-sm text-slate-900 placeholder:text-slate-400 focus:outline-hidden px-2 py-1.5 leading-relaxed min-h-[38px] max-h-32"
               />
 
