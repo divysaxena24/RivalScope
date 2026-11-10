@@ -480,3 +480,62 @@ export const monitoringJobsRelations = relations(monitoringJobs, ({ one }) => ({
     references: [scrapeResults.id],
   }),
 }));
+
+/**
+ * H. Chat Sessions
+ * Manages conversational threads in the AI Intelligence Assistant.
+ */
+export const chatSessions = pgTable(
+  "chat_sessions",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    title: varchar("title", { length: 255 }).notNull().default("New Analysis Session"),
+    selectedCompetitors: jsonb("selected_competitors").$type<string[]>().default([]).notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => [
+    index("chat_sessions_created_at_idx").on(table.createdAt),
+    index("chat_sessions_updated_at_idx").on(table.updatedAt),
+  ]
+);
+
+/**
+ * I. Chat Messages
+ * Stores every user inquiry and structured assistant intelligence response.
+ */
+export const chatMessages = pgTable(
+  "chat_messages",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    sessionId: uuid("session_id")
+      .notNull()
+      .references(() => chatSessions.id, { onDelete: "cascade" }),
+    role: varchar("role", { length: 20 }).notNull(), // 'user' | 'assistant'
+    content: text("content").notNull(),
+    structuredOutput: jsonb("structured_output").$type<Record<string, unknown> | null>(),
+    groundedCompetitorIds: jsonb("grounded_competitor_ids").$type<string[]>().default([]).notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => [
+    index("chat_messages_session_id_idx").on(table.sessionId),
+    index("chat_messages_created_at_idx").on(table.createdAt),
+  ]
+);
+
+export const chatSessionsRelations = relations(chatSessions, ({ many }) => ({
+  messages: many(chatMessages),
+}));
+
+export const chatMessagesRelations = relations(chatMessages, ({ one }) => ({
+  session: one(chatSessions, {
+    fields: [chatMessages.sessionId],
+    references: [chatSessions.id],
+  }),
+}));
