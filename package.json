@@ -7,6 +7,7 @@
     "css:build": "tailwindcss -i src/app/tailwind-input.css -o src/app/globals.css",
     "build": "pnpm run css:build && next build",
     "start": "next start",
+    "monitor:daily": "tsx src/scripts/monitor-daily.ts",
     "lint": "eslint",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "drizzle-kit migrate",
