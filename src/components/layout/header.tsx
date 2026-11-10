@@ -2,10 +2,8 @@
 
 import React, { useState } from "react";
 import { usePathname } from "next/navigation";
-import { Search, Plus, Menu, X, User } from "lucide-react";
-import { Input } from "@/components/ui/input";
+import { Plus, Menu, X, User } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { CompetitorSearch } from "./competitor-search";
 
 const pageTitles: Record<string, string> = {
   "/dashboard": "Overview",
@@ -43,9 +41,6 @@ export function Header({ onAddCompetitorClick, onMobileMenuToggle }: HeaderProps
       </div>
 
       <div className="flex items-center gap-3">
-        {/* Functional Global Competitor Search */}
-        <CompetitorSearch />
-
         {/* Quick Add Competitor button */}
         <Button
           onClick={onAddCompetitorClick}
