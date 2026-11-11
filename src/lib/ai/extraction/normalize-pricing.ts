@@ -52,15 +52,23 @@ export function normalizePricingPlan(
   pageCurrency: string | null,
   pageRegion: string | null = null
 ): NormalizedPricingPlan {
-  const isCustom =
-    raw.isCustomPricing ||
-    raw.price === null ||
-    /contact|quote|custom|enterprise|let'?s talk/i.test(raw.originalPriceText);
-
+  // Free detection first: explicit price === 0, isFree flag, or obvious free phrase
   const isFree =
     raw.isFree ||
     raw.price === 0 ||
-    /free|forever free|\$0|0\/mo/i.test(raw.originalPriceText);
+    /^(?:free|forever free|\$0(?:\/mo)?|0\/mo)$/i.test(raw.originalPriceText.trim());
+
+  // Numerical price check: if raw.price is a valid positive number, it is NOT custom pricing,
+  // even if words like "enterprise", "business", or "custom" appear in originalPriceText/planName.
+  const hasNumericPrice = raw.price !== null && raw.price !== undefined && !isNaN(Number(raw.price));
+
+  // Custom / Contact Sales detection: only when price is truly absent or explicitly custom without numeric price
+  const isCustom =
+    !hasNumericPrice &&
+    !isFree &&
+    (raw.isCustomPricing ||
+      raw.price === null ||
+      /contact|quote|custom quote|let'?s talk|contact sales|call us/i.test(raw.originalPriceText));
 
   // Decimal safe string representation for numeric postgres column
   let formattedPrice: string | null = null;
@@ -68,7 +76,7 @@ export function normalizePricingPlan(
     formattedPrice = null;
   } else if (isFree) {
     formattedPrice = "0.00";
-  } else if (raw.price !== null && raw.price !== undefined) {
+  } else if (hasNumericPrice) {
     formattedPrice = Number(raw.price).toFixed(2);
   }
 
@@ -165,5 +173,7 @@ export function normalizeExtractionResult(
     plans: normalizedPlans,
     rawPlanCount: normalizedPlans.length,
     featureCount: totalFeatures,
+    modelExtractedCount: output.plans.length,
+    validatedCount: normalizedPlans.length,
   };
 }
