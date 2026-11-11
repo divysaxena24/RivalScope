@@ -71,21 +71,39 @@ export async function POST(req: NextRequest, { params }: Params) {
           extractedPlanCount: 0,
           extractedFeatureCount: 0,
           detectedChangesCount: 0,
+          counts: {
+            modelExtracted: 0,
+            validated: 0,
+            distinctOfferings: 0,
+            persisted: 0,
+            skipped: 0,
+          },
           errorMessage: errMsg,
           plans: [],
         });
       }
     }
 
-    const totalPlans = results.reduce((acc, r) => acc + r.extractedPlanCount, 0);
+    const totalPersistedPlans = results.reduce((acc, r) => acc + (r.counts?.persisted ?? r.extractedPlanCount), 0);
+    const totalModelExtracted = results.reduce((acc, r) => acc + (r.counts?.modelExtracted ?? r.extractedPlanCount), 0);
+    const totalValidated = results.reduce((acc, r) => acc + (r.counts?.validated ?? r.extractedPlanCount), 0);
+    const totalDistinct = results.reduce((acc, r) => acc + (r.counts?.distinctOfferings ?? r.extractedPlanCount), 0);
+    const totalSkipped = results.reduce((acc, r) => acc + (r.counts?.skipped ?? 0), 0);
     const totalFeatures = results.reduce((acc, r) => acc + r.extractedFeatureCount, 0);
 
     return successResponse({
       competitorId,
       competitorName: competitor.name,
       scrapesProcessed: recentScrapes.length,
-      totalPlansExtracted: totalPlans,
+      totalPlansExtracted: totalPersistedPlans, // Report genuinely persisted plans
       totalFeaturesExtracted: totalFeatures,
+      summary: {
+        modelExtracted: totalModelExtracted,
+        validated: totalValidated,
+        distinctOfferings: totalDistinct,
+        persisted: totalPersistedPlans,
+        skipped: totalSkipped,
+      },
       results,
     });
   } catch (err: unknown) {
