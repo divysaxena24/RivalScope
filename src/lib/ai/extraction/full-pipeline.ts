@@ -28,9 +28,17 @@ export async function runScrapeAndExtractPipeline(competitorId: string) {
       extractionOutcomes.push({
         scrapeId: sId,
         competitorId,
-        status: "FAILED",
+        status: "FAILED" as const,
         extractedPlanCount: 0,
         extractedFeatureCount: 0,
+        detectedChangesCount: 0,
+        counts: {
+          modelExtracted: 0,
+          validated: 0,
+          distinctOfferings: 0,
+          persisted: 0,
+          skipped: 0,
+        },
         errorMessage: err instanceof Error ? err.message : "Extraction failed",
         plans: [],
       });

@@ -7,33 +7,23 @@ import {
   pricingSnapshots,
   featureSnapshots,
 } from "@/lib/db";
-import { eq, and, desc } from "drizzle-orm";
+import { eq, and, desc, sql } from "drizzle-orm";
 import { extractPricingFromMarkdown } from "@/lib/ai/extraction/extract-pricing";
-import { NormalizedPricingPlan, NormalizedExtractionResult } from "@/lib/ai/extraction/types";
+import {
+  NormalizedPricingPlan,
+  NormalizedExtractionResult,
+  ExtractionExecutionResult,
+  ExtractionCounts,
+} from "@/lib/ai/extraction/types";
 import { SnapshotPlan } from "@/lib/changes/types";
 import { detectChangesBetweenSnapshots } from "@/lib/changes/detect-changes";
 import { persistDetectedChanges } from "@/lib/changes/persist-changes";
 
+// Re-export ExtractionExecutionResult & ExtractionCounts from types
+export type { ExtractionExecutionResult, ExtractionCounts } from "@/lib/ai/extraction/types";
+
 // Active extraction locks to prevent concurrent duplicate extractions on the same scrape
 const activeExtractions = new Set<string>();
-
-export interface ExtractionExecutionResult {
-  scrapeId: string;
-  competitorId: string;
-  status: "SUCCESS" | "NO_PRICING_FOUND" | "FLAGGED_FOR_REVIEW" | "FAILED";
-  extractedPlanCount: number;
-  extractedFeatureCount: number;
-  detectedChangesCount: number;
-  warnings?: string[];
-  errorMessage?: string;
-  plans: Array<{
-    id: string;
-    planName: string;
-    price: string | null;
-    currency: string | null;
-    billingPeriod: string;
-  }>;
-}
 
 export interface ExecuteExtractionOptions {
   force?: boolean; // When true, bypasses content-hash deduplication
@@ -136,6 +126,13 @@ export async function executeExtractionForScrape(
           extractedPlanCount: currentActivePlans.length,
           extractedFeatureCount: currentActivePlans.reduce((acc, p) => acc + (p.features?.length || 0), 0),
           detectedChangesCount: 0,
+          counts: {
+            modelExtracted: currentActivePlans.length,
+            validated: currentActivePlans.length,
+            distinctOfferings: currentActivePlans.length,
+            persisted: currentActivePlans.length,
+            skipped: 0,
+          },
           warnings: ["Content hash unchanged since last scrape; skipped redundant LLM extraction."],
           plans: currentActivePlans.map((p) => ({
             id: p.id,
@@ -177,6 +174,13 @@ export async function executeExtractionForScrape(
         extractedPlanCount: 0,
         extractedFeatureCount: 0,
         detectedChangesCount: 0,
+        counts: {
+          modelExtracted: 0,
+          validated: 0,
+          distinctOfferings: 0,
+          persisted: 0,
+          skipped: 0,
+        },
         warnings: [
           "Page was analyzed but no pricing tiers or subscription models were detected in the source content.",
         ],
@@ -200,11 +204,11 @@ export async function executeExtractionForScrape(
 
     // 4. Sequential atomic persistence of current plans & immutable snapshots
     for (const plan of extraction.plans) {
-      // Identity check: match competitorId AND planName AND billingPeriod AND currency
+      // Identity check: match competitorId AND planName (case-insensitive) AND billingPeriod AND currency
       const existingPlan = await db.query.pricingPlans.findFirst({
         where: and(
           eq(pricingPlans.competitorId, scrape.competitorId),
-          eq(pricingPlans.planName, plan.planName),
+          sql`lower(${pricingPlans.planName}) = ${plan.planName.trim().toLowerCase()}`,
           eq(pricingPlans.billingPeriod, plan.billingPeriod),
           plan.currency ? eq(pricingPlans.currency, plan.currency) : undefined
         ),
@@ -256,6 +260,14 @@ export async function executeExtractionForScrape(
             extractedPlanCount: savedPlans.length,
             extractedFeatureCount: 0,
             detectedChangesCount: 0,
+            counts: {
+              modelExtracted: extraction.modelExtractedCount || extraction.plans.length,
+              validated: extraction.validatedCount || extraction.plans.length,
+              distinctOfferings: extraction.plans.length,
+              persisted: savedPlans.length,
+              skipped: extraction.plans.length - savedPlans.length,
+              skippedReasons: { "FLAGGED_FOR_REVIEW_FEATURE_DROP": extraction.plans.length - savedPlans.length },
+            },
             warnings: [
               `Suspicious feature drop detected: extracted only ${totalBatchFeaturesCount} features compared to ${previousFeaturesCount} previously observed. Prior valid snapshots preserved.`,
             ],
@@ -403,6 +415,17 @@ export async function executeExtractionForScrape(
       extractedPlanCount: savedPlans.length,
       extractedFeatureCount: totalFeaturesInserted,
       detectedChangesCount: insertedCount,
+      counts: {
+        modelExtracted: extraction.modelExtractedCount || extraction.plans.length,
+        validated: extraction.validatedCount || extraction.plans.length,
+        distinctOfferings: extraction.plans.length,
+        persisted: savedPlans.length,
+        skipped: Math.max(0, (extraction.modelExtractedCount || extraction.plans.length) - savedPlans.length),
+        skippedReasons:
+          (extraction.modelExtractedCount || extraction.plans.length) > savedPlans.length
+            ? { "DUPLICATE_OR_INVALID": (extraction.modelExtractedCount || extraction.plans.length) - savedPlans.length }
+            : undefined,
+      },
       warnings: extraction.reviewReason ? [extraction.reviewReason] : undefined,
       plans: savedPlans,
     };
