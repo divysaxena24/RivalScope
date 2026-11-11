@@ -148,6 +148,9 @@ export function mergeExtractionPasses(
     finalStatus = allWarnings.length > 0 ? "FLAGGED_FOR_REVIEW" : "NO_PRICING_FOUND";
   }
 
+  const totalModelExtracted = results.reduce((acc, r) => acc + (r.modelExtractedCount || r.rawPlanCount || 0), 0);
+  const totalValidated = results.reduce((acc, r) => acc + (r.validatedCount || r.rawPlanCount || 0), 0);
+
   return {
     companyName,
     productName,
@@ -158,5 +161,7 @@ export function mergeExtractionPasses(
     plans: finalPlans,
     rawPlanCount: finalPlans.length,
     featureCount: totalFeatures,
+    modelExtractedCount: totalModelExtracted,
+    validatedCount: totalValidated,
   };
 }

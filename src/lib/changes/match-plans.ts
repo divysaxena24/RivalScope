@@ -39,8 +39,8 @@ export function matchPlans(
     }
 
     // 2. Exact or normalized name match WITH billing period check:
-    // Do not match a monthly plan with a yearly plan if billing periods are distinct
-    if (matchedIdx === -1) {
+    // Only attempt name match if curr does NOT already have an explicit pricingPlanId that differed from previous plans
+    if (matchedIdx === -1 && !curr.pricingPlanId) {
       matchedIdx = previousPlans.findIndex((p, idx) => {
         if (usedPrevIndices.has(idx)) return false;
         const nameMatches = normalizePlanName(p.planName) === currNorm;
