@@ -16,9 +16,9 @@ export interface ModelTokenBudget {
 
 export const MODEL_TOKEN_CONFIGS: Record<string, { maxContext: number; itpm: number; otpm: number }> = {
   "qwen/qwen3.8-27b": { maxContext: 32768, itpm: 7000, otpm: 1000 },
-  "openai/gpt-oss-120b": { maxContext: 32768, itpm: 8000, otpm: 2000 },
-  "openai/gpt-oss-20b": { maxContext: 32768, itpm: 8000, otpm: 2000 },
-  "llama-3.3-70b-versatile": { maxContext: 32768, itpm: 12000, otpm: 2000 },
+  "openai/gpt-oss-120b": { maxContext: 32768, itpm: 8000, otpm: 1000 },
+  "openai/gpt-oss-20b": { maxContext: 32768, itpm: 8000, otpm: 1000 },
+  "llama-3.3-70b-versatile": { maxContext: 32768, itpm: 12000, otpm: 1000 },
   "default": { maxContext: 16384, itpm: 7000, otpm: 1000 },
 };
 
