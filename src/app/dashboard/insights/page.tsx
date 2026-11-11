@@ -452,21 +452,6 @@ export default function InsightsChatbotPage() {
                 >
                   <FormattedChatContent content={msg.content} isUser={msg.role === "user"} />
 
-                  {/* Grounded Database Badges for Assistant */}
-                  {msg.groundedCompetitors && msg.groundedCompetitors.length > 0 && (
-                    <div className="mt-3 pt-2.5 border-t border-slate-200/60 flex flex-wrap items-center gap-1.5 text-[11px] text-slate-500">
-                      <span className="font-medium text-slate-400">Database ground truth:</span>
-                      {msg.groundedCompetitors.map((gc) => (
-                        <span
-                          key={gc.id}
-                          className="px-2 py-0.5 rounded-md bg-white border border-slate-200 font-semibold text-slate-700 text-[11px]"
-                        >
-                          {gc.name}
-                        </span>
-                      ))}
-                    </div>
-                  )}
-
                   <div
                     className={`text-[10px] mt-2 flex items-center gap-1 ${
                       msg.role === "user" ? "text-slate-400 justify-end" : "text-slate-400"

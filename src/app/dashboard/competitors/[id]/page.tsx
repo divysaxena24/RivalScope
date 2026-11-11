@@ -222,9 +222,12 @@ export default function CompetitorDetailPage({
           message: "Groq LLM analyzed scraped content, but found no pricing tiers.",
         });
       } else {
+        const countsSummary = d.summary
+          ? ` (Model: ${d.summary.modelExtracted}, Validated: ${d.summary.validated}, Distinct: ${d.summary.distinctOfferings}, Persisted: ${d.summary.persisted})`
+          : "";
         setFeedback({
           type: "success",
-          message: `Extracted ${d.totalPlansExtracted} plan(s) and ${d.totalFeaturesExtracted} feature entitlements into database.`,
+          message: `Extracted & persisted ${d.totalPlansExtracted} plan(s) and ${d.totalFeaturesExtracted} feature entitlements${countsSummary}.`,
         });
       }
       loadCompetitorData();
