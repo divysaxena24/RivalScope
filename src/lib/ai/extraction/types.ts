@@ -298,6 +298,34 @@ export interface PlanFeatureItem {
   evidenceText: string | null;
 }
 
+export interface ExtractionCounts {
+  modelExtracted: number;
+  validated: number;
+  distinctOfferings: number;
+  persisted: number;
+  skipped: number;
+  skippedReasons?: Record<string, number>;
+}
+
+export interface ExtractionExecutionResult {
+  scrapeId: string;
+  competitorId: string;
+  status: "SUCCESS" | "NO_PRICING_FOUND" | "FLAGGED_FOR_REVIEW" | "FAILED";
+  extractedPlanCount: number;
+  extractedFeatureCount: number;
+  detectedChangesCount: number;
+  counts: ExtractionCounts;
+  warnings?: string[];
+  errorMessage?: string;
+  plans: Array<{
+    id: string;
+    planName: string;
+    price: string | null;
+    currency: string | null;
+    billingPeriod: string;
+  }>;
+}
+
 export interface NormalizedPricingPlan {
   planName: string;
   description: string | null;
@@ -326,4 +354,6 @@ export interface NormalizedExtractionResult {
   plans: NormalizedPricingPlan[];
   rawPlanCount: number;
   featureCount: number;
+  modelExtractedCount?: number;
+  validatedCount?: number;
 }
