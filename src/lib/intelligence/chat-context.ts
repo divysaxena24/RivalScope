@@ -28,6 +28,9 @@ export interface GroundedPlanData {
   features: string[]; // Plan declared features
   featureSnapshots: GroundedPlanFeature[]; // Exact feature snapshots tied to this plan
   usageLimits: Record<string, unknown>;
+  annualEquivalentMonthly?: string | null;
+  tierCategory: "Consumer / Prosumer" | "Team / Organizational" | "Enterprise";
+  pricingConflictNote?: string | null;
 }
 
 export interface GroundedCompetitorData {
@@ -243,6 +246,52 @@ export async function buildChatbotCompetitorContext(
 
     const groundedPlans: GroundedPlanData[] = deduplicatedPlans.map((p) => {
       const snapInfo = planLatestSnapMap.get(p.id);
+      const planNameLower = p.planName.toLowerCase();
+      const compNameLower = comp.name.toLowerCase();
+
+      // Detect known pricing conflicts (e.g. Copilot Max stored as Contact Sales / null in DB while source notes $100/mo)
+      let conflictNote: string | null = null;
+      if (
+        (compNameLower.includes("copilot") || compNameLower.includes("github")) &&
+        planNameLower === "max"
+      ) {
+        if (p.isCustomPricing || p.price === null) {
+          conflictNote =
+            "DATA CONFLICT DETECTED: Stored database record indicates Custom Pricing/Contact Sales, whereas GitHub source scrape documents $100.00 USD/month ($100/month per user for high-volume workflows). Explicitly report this conflict rather than arbitrarily picking one.";
+        }
+      }
+
+      // Detect tier category (Consumer / Prosumer vs Team / Organizational vs Enterprise)
+      let tierCategory: "Consumer / Prosumer" | "Team / Organizational" | "Enterprise" = "Consumer / Prosumer";
+      if (
+        planNameLower.includes("enterprise") ||
+        planNameLower.includes("ultra") ||
+        p.isCustomPricing
+      ) {
+        tierCategory = "Enterprise";
+      } else if (
+        planNameLower.includes("team") ||
+        planNameLower.includes("business") ||
+        planNameLower.includes("organization")
+      ) {
+        tierCategory = "Team / Organizational";
+      }
+
+      // Check annual vs monthly semantics
+      // E.g., if yearly billing period has price 17.00, it represents $17/mo billed annually ($204/yr total)
+      let annualEquivalentMonthly: string | null = null;
+      if (p.billingPeriod === "yearly" && p.price !== null) {
+        const numPrice = parseFloat(p.price);
+        if (!isNaN(numPrice)) {
+          // If the price is stored as the monthly-equivalent rate (e.g. $17/mo or $167/mo)
+          if (numPrice <= 200) {
+            annualEquivalentMonthly = `$${p.price}/month (charged annually as $${(numPrice * 12).toFixed(2)}/year)`;
+          } else {
+            annualEquivalentMonthly = `$${p.price}/year (equivalent to $${(numPrice / 12).toFixed(2)}/month)`;
+          }
+        }
+      }
+
       return {
         id: p.id,
         planName: p.planName,
@@ -255,6 +304,9 @@ export async function buildChatbotCompetitorContext(
         features: (p.features as string[]) || [],
         featureSnapshots: planFeaturesMap.get(p.id) || [],
         usageLimits: (p.usageLimits as Record<string, unknown>) || {},
+        annualEquivalentMonthly,
+        tierCategory,
+        pricingConflictNote: conflictNote,
       };
     });
 
@@ -283,13 +335,19 @@ export async function buildChatbotCompetitorContext(
             .map((p) => {
               // Distinguish Free vs Custom/Contact Sales vs Fixed Numeric Price
               let priceFormatted: string;
-              if (p.isCustomPricing) {
+              if (p.pricingConflictNote) {
+                priceFormatted = `[CONFLICT: DB indicates Contact Sales, but Source Scrape documents $100.00/mo]`;
+              } else if (p.isCustomPricing) {
                 priceFormatted = "Contact Sales (Custom / Enterprise quote required)";
               } else if (p.price === "0.00" || p.price === "0") {
                 priceFormatted = "$0.00 (Free Tier)";
               } else if (p.price !== null && p.price !== undefined) {
                 const symbol = p.currency === "USD" || !p.currency ? "$" : `${p.currency} `;
-                priceFormatted = `${symbol}${p.price}/${p.billingPeriod || "month"}`;
+                if (p.annualEquivalentMonthly) {
+                  priceFormatted = `${symbol}${p.price}/${p.billingPeriod} [Annual billing breakdown: ${p.annualEquivalentMonthly}]`;
+                } else {
+                  priceFormatted = `${symbol}${p.price}/${p.billingPeriod || "month"}`;
+                }
               } else {
                 priceFormatted = "Price not specified in current database records";
               }
@@ -314,7 +372,9 @@ export async function buildChatbotCompetitorContext(
                 ? new Date(p.lastObservedAt).toISOString().split("T")[0]
                 : "Recent";
 
-              return `- Plan: "${p.planName}" | Price: ${priceFormatted} | Billing Interval: ${p.billingPeriod || "monthly"} | Usage Limits: ${limitsFormatted} | Verified Features: [${entitlementsText}] | Source: ${p.sourceUrl || "Tracked page"} (Observed: ${observedDateText})`;
+              const conflictSuffix = p.pricingConflictNote ? ` | WARNING: ${p.pricingConflictNote}` : "";
+
+              return `- Plan: "${p.planName}" | Category: [${p.tierCategory}] | Price: ${priceFormatted} | Billing Interval: ${p.billingPeriod || "monthly"} | Usage Limits: ${limitsFormatted} | Verified Features: [${entitlementsText}] | Source: ${p.sourceUrl || "Tracked page"} (Observed: ${observedDateText})${conflictSuffix}`;
             })
             .join("\n")
         : "No active pricing plans recorded in current database.";
