@@ -134,7 +134,7 @@ describe("AI Insights Chat Context Grounding Tests", () => {
     expect(context.competitors[0].plans).toHaveLength(1);
     expect(context.competitors[0].plans[0].planName).toBe("Max");
     expect(context.competitors[0].plans[0].price).toBe("100.00");
-    expect(context.summaryText).toContain('Plan: "Max" | Price: $100.00/monthly');
+    expect(context.summaryText).toContain('Plan: "Max" | Category: [Consumer / Prosumer] | Price: $100.00/monthly');
     expect(context.summaryText).toContain("Source: https://github.com/features/copilot/plans");
   });
 
@@ -318,8 +318,170 @@ describe("AI Insights Chat Context Grounding Tests", () => {
 
     const context = await buildChatbotCompetitorContext(["comp-3"]);
     expect(context.competitors[0].plans).toHaveLength(2);
-    expect(context.summaryText).toContain('Plan: "Pro" | Price: $20.00/monthly');
-    expect(context.summaryText).toContain('Plan: "Pro" | Price: $17.00/yearly');
+    expect(context.summaryText).toContain('Plan: "Pro" | Category: [Consumer / Prosumer] | Price: $20.00/monthly');
+    expect(context.summaryText).toContain('Plan: "Pro" | Category: [Consumer / Prosumer] | Price: $17.00/yearly [Annual billing breakdown: $17.00/month (charged annually as $204.00/year)]');
+  });
+
+  it("4. detects and surfaces Copilot Max pricing conflict between database and source documentation", async () => {
+    const mockCompetitors = [
+      { id: "comp-copilot", name: "GitHub Copilot", domain: "github.com", website: "https://github.com", status: "active", industry: "Tech", description: "AI Assistant" },
+    ];
+
+    const mockPricingPlans = [
+      {
+        id: "plan-copilot-max",
+        competitorId: "comp-copilot",
+        planName: "Max",
+        price: null,
+        currency: "USD",
+        billingPeriod: "monthly",
+        isCustomPricing: true,
+        isActive: true,
+        sourceUrl: "https://github.com/features/copilot/plans",
+        features: ["High volume workflows"],
+        usageLimits: {},
+        updatedAt: new Date("2026-11-12T10:00:00Z"),
+      },
+    ];
+
+    let selectCallCount = 0;
+    (db.select as any).mockImplementation(() => {
+      selectCallCount++;
+      if (selectCallCount === 1) return { from: () => ({ where: () => Promise.resolve(mockCompetitors) }) };
+      if (selectCallCount === 2) return { from: () => ({ where: () => ({ orderBy: () => Promise.resolve(mockPricingPlans) }) }) };
+      if (selectCallCount === 3) return { from: () => ({ where: () => ({ orderBy: () => ({ limit: () => Promise.resolve([]) }) }) }) };
+      if (selectCallCount === 4) return { from: () => ({ where: () => ({ orderBy: () => Promise.resolve([]) }) }) };
+      if (selectCallCount === 5) return { from: () => ({ where: () => ({ orderBy: () => Promise.resolve([]) }) }) };
+      if (selectCallCount === 6) return { from: () => ({ where: () => ({ orderBy: () => ({ limit: () => Promise.resolve([]) }) }) }) };
+      if (selectCallCount === 7) return { from: () => ({ where: () => ({ orderBy: () => ({ limit: () => Promise.resolve([]) }) }) }) };
+      return { from: () => ({ where: () => Promise.resolve([]) }) };
+    });
+
+    const context = await buildChatbotCompetitorContext(["comp-copilot"]);
+    const maxPlan = context.competitors[0].plans[0];
+
+    expect(maxPlan.pricingConflictNote).toBeDefined();
+    expect(maxPlan.pricingConflictNote).toContain("DATA CONFLICT DETECTED");
+    expect(maxPlan.pricingConflictNote).toContain("$100.00 USD/month");
+    expect(context.summaryText).toContain("WARNING: DATA CONFLICT DETECTED");
+  });
+
+  it("5. strictly separates consumer, team, and enterprise product categories", async () => {
+    const mockCompetitors = [
+      { id: "comp-claude", name: "Claude", domain: "claude.com", website: "https://claude.com", status: "active", industry: "Tech", description: "AI Assistant" },
+    ];
+
+    const mockPricingPlans = [
+      {
+        id: "plan-pro",
+        competitorId: "comp-claude",
+        planName: "Pro",
+        price: "20.00",
+        currency: "USD",
+        billingPeriod: "monthly",
+        isCustomPricing: false,
+        isActive: true,
+        sourceUrl: "https://claude.com/pricing",
+        features: [],
+        usageLimits: {},
+        updatedAt: new Date("2026-11-12T10:00:00Z"),
+      },
+      {
+        id: "plan-team",
+        competitorId: "comp-claude",
+        planName: "Team",
+        price: "30.00",
+        currency: "USD",
+        billingPeriod: "monthly",
+        isCustomPricing: false,
+        isActive: true,
+        sourceUrl: "https://claude.com/pricing",
+        features: [],
+        usageLimits: {},
+        updatedAt: new Date("2026-11-12T10:00:00Z"),
+      },
+      {
+        id: "plan-ent",
+        competitorId: "comp-claude",
+        planName: "Enterprise",
+        price: null,
+        currency: "USD",
+        billingPeriod: "monthly",
+        isCustomPricing: true,
+        isActive: true,
+        sourceUrl: "https://claude.com/pricing",
+        features: [],
+        usageLimits: {},
+        updatedAt: new Date("2026-11-12T10:00:00Z"),
+      },
+    ];
+
+    let selectCallCount = 0;
+    (db.select as any).mockImplementation(() => {
+      selectCallCount++;
+      if (selectCallCount === 1) return { from: () => ({ where: () => Promise.resolve(mockCompetitors) }) };
+      if (selectCallCount === 2) return { from: () => ({ where: () => ({ orderBy: () => Promise.resolve(mockPricingPlans) }) }) };
+      if (selectCallCount === 3) return { from: () => ({ where: () => ({ orderBy: () => ({ limit: () => Promise.resolve([]) }) }) }) };
+      if (selectCallCount === 4) return { from: () => ({ where: () => ({ orderBy: () => Promise.resolve([]) }) }) };
+      if (selectCallCount === 5) return { from: () => ({ where: () => ({ orderBy: () => Promise.resolve([]) }) }) };
+      if (selectCallCount === 6) return { from: () => ({ where: () => ({ orderBy: () => ({ limit: () => Promise.resolve([]) }) }) }) };
+      if (selectCallCount === 7) return { from: () => ({ where: () => ({ orderBy: () => ({ limit: () => Promise.resolve([]) }) }) }) };
+      return { from: () => ({ where: () => Promise.resolve([]) }) };
+    });
+
+    const context = await buildChatbotCompetitorContext(["comp-claude"]);
+    const plans = context.competitors[0].plans;
+
+    const pro = plans.find((p) => p.planName === "Pro");
+    const team = plans.find((p) => p.planName === "Team");
+    const ent = plans.find((p) => p.planName === "Enterprise");
+
+    expect(pro?.tierCategory).toBe("Consumer / Prosumer");
+    expect(team?.tierCategory).toBe("Team / Organizational");
+    expect(ent?.tierCategory).toBe("Enterprise");
+    expect(context.summaryText).toContain('Category: [Consumer / Prosumer]');
+    expect(context.summaryText).toContain('Category: [Team / Organizational]');
+    expect(context.summaryText).toContain('Category: [Enterprise]');
+  });
+
+  it("6. marks missing quotas and unknown feature claims transparently without inventing data", async () => {
+    const mockCompetitors = [
+      { id: "comp-gemini", name: "Gemini", domain: "gemini.google.com", website: "https://gemini.google.com", status: "active", industry: "Tech", description: "AI Assistant" },
+    ];
+
+    const mockPricingPlans = [
+      {
+        id: "plan-gemini-pro",
+        competitorId: "comp-gemini",
+        planName: "Google AI Pro",
+        price: "19.99",
+        currency: "USD",
+        billingPeriod: "monthly",
+        isCustomPricing: false,
+        isActive: true,
+        sourceUrl: "https://gemini.google.com/advanced",
+        features: [],
+        usageLimits: {}, // empty usage limits
+        updatedAt: new Date("2026-11-12T10:00:00Z"),
+      },
+    ];
+
+    let selectCallCount = 0;
+    (db.select as any).mockImplementation(() => {
+      selectCallCount++;
+      if (selectCallCount === 1) return { from: () => ({ where: () => Promise.resolve(mockCompetitors) }) };
+      if (selectCallCount === 2) return { from: () => ({ where: () => ({ orderBy: () => Promise.resolve(mockPricingPlans) }) }) };
+      if (selectCallCount === 3) return { from: () => ({ where: () => ({ orderBy: () => ({ limit: () => Promise.resolve([]) }) }) }) };
+      if (selectCallCount === 4) return { from: () => ({ where: () => ({ orderBy: () => Promise.resolve([]) }) }) };
+      if (selectCallCount === 5) return { from: () => ({ where: () => ({ orderBy: () => Promise.resolve([]) }) }) };
+      if (selectCallCount === 6) return { from: () => ({ where: () => ({ orderBy: () => ({ limit: () => Promise.resolve([]) }) }) }) };
+      if (selectCallCount === 7) return { from: () => ({ where: () => ({ orderBy: () => ({ limit: () => Promise.resolve([]) }) }) }) };
+      return { from: () => ({ where: () => Promise.resolve([]) }) };
+    });
+
+    const context = await buildChatbotCompetitorContext(["comp-gemini"]);
+    expect(context.summaryText).toContain("Usage Limits: Not specified in database records");
+    expect(context.summaryText).toContain("Verified Features: [Standard entitlements]");
   });
 });
 
