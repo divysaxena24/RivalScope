@@ -159,7 +159,12 @@ export async function POST(req: NextRequest) {
 
     // Check if competitor profile exists but has zero plans and zero features
     const totalDataPoints = activeComps.reduce(
-      (acc, c) => acc + c.plans.length + c.features.length + c.recentChanges.length,
+      (acc, c) =>
+        acc +
+        c.plans.length +
+        c.plans.reduce((fAcc, p) => fAcc + p.featureSnapshots.length, 0) +
+        c.unassociatedFeatures.length +
+        c.recentChanges.length,
       0
     );
 
@@ -238,7 +243,9 @@ ${summaryText}
         name: c.name,
         domain: c.domain,
         planCount: c.plans.length,
-        featureCount: c.features.length,
+        featureCount:
+          c.plans.reduce((fAcc, p) => fAcc + p.featureSnapshots.length, 0) +
+          c.unassociatedFeatures.length,
         changeCount: c.recentChanges.length,
       })),
     });
