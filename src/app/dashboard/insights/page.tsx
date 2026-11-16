@@ -14,6 +14,7 @@ import {
   MessageSquare,
   Building2,
   Check,
+  Layers,
 } from "lucide-react";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -58,7 +59,8 @@ const SAMPLE_PROMPTS = [
 
 export default function InsightsChatbotPage() {
   const [competitorsList, setCompetitorsList] = useState<CompetitorOption[]>([]);
-  const [selectedCompetitorId, setSelectedCompetitorId] = useState<string>("all");
+  const [selectedCompetitorIds, setSelectedCompetitorIds] = useState<string[]>(["all"]);
+  const [isCompetitorDropdownOpen, setIsCompetitorDropdownOpen] = useState(false);
   const [sessions, setSessions] = useState<ChatSessionItem[]>([]);
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -67,6 +69,19 @@ export default function InsightsChatbotPage() {
   const [historySidebarOpen, setHistorySidebarOpen] = useState(true);
   const [sessionToDelete, setSessionToDelete] = useState<ChatSessionItem | null>(null);
   const [isDeletingSession, setIsDeletingSession] = useState(false);
+
+  const competitorDropdownRef = useRef<HTMLDivElement>(null);
+
+  // Close competitor dropdown on click outside
+  useEffect(() => {
+    function handleClickOutside(event: MouseEvent) {
+      if (competitorDropdownRef.current && !competitorDropdownRef.current.contains(event.target as Node)) {
+        setIsCompetitorDropdownOpen(false);
+      }
+    }
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
 
   const messagesContainerRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -146,8 +161,7 @@ export default function InsightsChatbotPage() {
 
         // Restore active competitor scope from session
         if (Array.isArray(session.selectedCompetitors) && session.selectedCompetitors.length > 0) {
-          const first = session.selectedCompetitors[0];
-          setSelectedCompetitorId(first === "all" ? "all" : first);
+          setSelectedCompetitorIds(session.selectedCompetitors);
         }
 
         // Map messages
@@ -221,9 +235,35 @@ export default function InsightsChatbotPage() {
     }
   };
 
+  // Toggle individual competitor selection
+  const toggleCompetitorSelection = (compId: string) => {
+    if (compId === "all") {
+      setSelectedCompetitorIds(["all"]);
+      return;
+    }
+
+    setSelectedCompetitorIds((prev) => {
+      const withoutAll = prev.filter((id) => id !== "all");
+      if (withoutAll.includes(compId)) {
+        const remaining = withoutAll.filter((id) => id !== compId);
+        return remaining.length === 0 ? ["all"] : remaining;
+      } else {
+        const updated = [...withoutAll, compId];
+        // If all competitors are manually selected, normalize back to ["all"]
+        return updated.length === competitorsList.length ? ["all"] : updated;
+      }
+    });
+  };
+
   // Calculate competitor option labels for dropdown
   const totalCompetitorsCount = competitorsList.length;
-  const currentCompetitor = competitorsList.find((c) => c.id === selectedCompetitorId);
+  const isAllSelected = selectedCompetitorIds.includes("all") || selectedCompetitorIds.length === totalCompetitorsCount;
+  const selectedCount = isAllSelected ? totalCompetitorsCount : selectedCompetitorIds.length;
+  const targetLabel = isAllSelected
+    ? `All Competitors (${totalCompetitorsCount})`
+    : selectedCompetitorIds.length === 1
+    ? competitorsList.find((c) => c.id === selectedCompetitorIds[0])?.name || "1 Competitor"
+    : `${selectedCompetitorIds.length} Competitors`;
 
   // Send message
   const handleSendMessage = async (textToSend?: string) => {
@@ -251,7 +291,7 @@ export default function InsightsChatbotPage() {
         content: m.content,
       }));
 
-      const targetCompetitorIds = selectedCompetitorId === "all" ? ["all"] : [selectedCompetitorId];
+      const targetCompetitorIds = isAllSelected ? ["all"] : selectedCompetitorIds;
 
       const res = await fetch("/api/insights/chat", {
         method: "POST",
@@ -315,10 +355,115 @@ export default function InsightsChatbotPage() {
   };
 
   return (
-    <div className="flex-1 flex flex-col min-h-0 h-full overflow-hidden">
-      {/* Compact Header */}
-      <div className="shrink-0 pb-3 flex items-center justify-between">
-        <h1 className="text-xl font-bold text-slate-900 tracking-tight">AI Insights</h1>
+    <div className="flex-1 flex flex-col min-h-0 h-full">
+      {/* Header with Competitor Scope Filter */}
+      <div className="shrink-0 pb-3 flex flex-wrap items-center justify-between gap-3 border-b border-slate-200/70 mb-3">
+        <div className="flex items-center gap-2">
+          <h1 className="text-xl font-bold text-slate-900 tracking-tight">AI Insights</h1>
+          <span className="hidden sm:inline-block text-xs text-slate-400 font-normal">
+            • Competitive Assistant
+          </span>
+        </div>
+
+        {/* Global Competitor Scope Filter */}
+        <div className="flex items-center gap-2">
+          {/* Multi-Competitor Scope Popover */}
+          <div className="relative" ref={competitorDropdownRef}>
+            <button
+              type="button"
+              onClick={() => setIsCompetitorDropdownOpen(!isCompetitorDropdownOpen)}
+              aria-label="Filter target competitors"
+              className="flex items-center gap-1.5 bg-white border border-slate-200 text-slate-800 text-xs font-medium rounded-lg px-3 py-1.5 hover:bg-slate-50 focus:outline-hidden focus:ring-1 focus:ring-indigo-500 cursor-pointer shadow-2xs transition-colors"
+            >
+              <Layers className="h-3.5 w-3.5 text-indigo-600" />
+              <span className="max-w-[150px] truncate">{targetLabel}</span>
+              <ChevronDown className="h-3.5 w-3.5 text-slate-400" />
+            </button>
+
+            {/* Multi-select Dropdown Menu: Opens Downwards Cleanly Above Chat Panel */}
+            {isCompetitorDropdownOpen && (
+              <div className="absolute right-0 sm:left-0 top-full mt-1.5 w-64 max-h-72 flex flex-col bg-white border border-slate-200 rounded-xl shadow-xl z-50 p-2 space-y-1">
+                <div className="px-2 py-1 text-[10px] font-semibold text-slate-400 uppercase tracking-wider flex items-center justify-between shrink-0">
+                  <span>Target Competitors</span>
+                  {!isAllSelected && (
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setSelectedCompetitorIds(["all"]);
+                      }}
+                      className="text-[10px] font-medium text-indigo-600 hover:text-indigo-800"
+                    >
+                      Reset to All
+                    </button>
+                  )}
+                </div>
+                
+                {/* All Competitors Option */}
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    toggleCompetitorSelection("all");
+                  }}
+                  className={`w-full shrink-0 flex items-center justify-between px-2.5 py-2 rounded-lg text-xs font-medium cursor-pointer transition-colors ${
+                    isAllSelected
+                      ? "bg-indigo-50 text-indigo-700 font-semibold"
+                      : "text-slate-700 hover:bg-slate-100"
+                  }`}
+                >
+                  <div className="flex items-center gap-2">
+                    <Building2 className="h-4 w-4 text-slate-400" />
+                    <span>All Competitors ({totalCompetitorsCount})</span>
+                  </div>
+                  {isAllSelected && <Check className="h-4 w-4 text-indigo-600" />}
+                </button>
+
+                <div className="border-t border-slate-100 my-1 shrink-0" />
+
+                {/* Individual Competitors List */}
+                <div className="flex-1 overflow-y-auto space-y-0.5 pr-0.5">
+                  {competitorsList.length === 0 ? (
+                    <div className="text-center py-4 text-xs text-slate-400">
+                      No competitors tracked yet
+                    </div>
+                  ) : (
+                    competitorsList.map((c) => {
+                      const isSelected = !isAllSelected && selectedCompetitorIds.includes(c.id);
+                      return (
+                        <button
+                          key={c.id}
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            toggleCompetitorSelection(c.id);
+                          }}
+                          className={`w-full flex items-center justify-between px-2.5 py-1.5 rounded-lg text-xs cursor-pointer transition-colors ${
+                            isSelected
+                              ? "bg-indigo-50 text-indigo-700 font-medium"
+                              : "text-slate-700 hover:bg-slate-100"
+                          }`}
+                        >
+                          <div className="flex items-center gap-2 truncate">
+                            <span className="truncate">{c.name}</span>
+                            <span className="text-[10px] text-slate-400 font-mono">
+                              ({c.activePlanCount ?? 0} plans)
+                            </span>
+                          </div>
+                          <div className={`w-4 h-4 rounded border flex items-center justify-center shrink-0 transition-colors ${
+                            isSelected ? "bg-indigo-600 border-indigo-600 text-white" : "border-slate-300 bg-white"
+                          }`}>
+                            {isSelected && <Check className="h-3 w-3 stroke-[3]" />}
+                          </div>
+                        </button>
+                      );
+                    })
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
       </div>
 
       {/* Main Workspace: History Sidebar + Chat Panel */}
@@ -413,7 +558,7 @@ export default function InsightsChatbotPage() {
         </div>
 
         {/* Main Chat Panel: Full Height, Message Area Scrolls, Composer Fixed at Bottom */}
-        <Card className="flex-1 flex flex-col min-h-0 min-w-0 bg-white border border-slate-200/90 shadow-2xs rounded-xl overflow-hidden">
+        <Card className="flex-1 flex flex-col min-h-0 min-w-0 bg-white border border-slate-200/90 shadow-2xs rounded-xl relative z-10 overflow-visible">
           {/* Conversation Messages Container: Independent Scroll Area */}
           <div
             ref={messagesContainerRef}
@@ -497,31 +642,26 @@ export default function InsightsChatbotPage() {
             </div>
           )}
 
-          {/* Chat Composer: Integrated Competitor Dropdown + Textarea + Send Button */}
-          <div className="p-3 sm:p-4 border-t border-slate-200 bg-white shrink-0">
-            <div className="flex flex-col sm:flex-row items-stretch sm:items-end gap-2 bg-slate-50 border border-slate-200 rounded-xl p-2 focus-within:ring-2 focus-within:ring-indigo-500 focus-within:bg-white transition-all">
-              {/* Dynamic Competitor Scope Dropdown */}
-              <div className="relative shrink-0 sm:self-center">
-                <div className="relative">
-                  <select
-                    value={selectedCompetitorId}
-                    onChange={(e) => setSelectedCompetitorId(e.target.value)}
-                    aria-label="Select target competitor"
-                    className="w-full sm:w-auto appearance-none bg-white border border-slate-200 text-slate-800 text-xs font-medium rounded-lg pl-3 pr-8 py-2 hover:bg-slate-50 focus:outline-hidden focus:ring-1 focus:ring-indigo-500 cursor-pointer shadow-2xs transition-colors"
-                  >
-                    <option value="all">
-                      All Competitors ({totalCompetitorsCount})
-                    </option>
-                    {competitorsList.map((c) => (
-                      <option key={c.id} value={c.id}>
-                        {c.name} ({c.activePlanCount ?? 0})
-                      </option>
-                    ))}
-                  </select>
-                  <ChevronDown className="h-3.5 w-3.5 text-slate-400 absolute right-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
-                </div>
+          {/* Chat Composer: Floating Context Badges + Textarea + Send Button */}
+          <div className="p-3 sm:p-4 border-t border-slate-200 bg-white shrink-0 relative">
+            {/* Context bar right above the input box */}
+            <div className="mb-2 flex items-center justify-between gap-2 px-1">
+              <div className="flex items-center gap-1.5 flex-wrap">
+                <span className="text-[11px] font-medium text-slate-500 flex items-center gap-1">
+                  <Layers className="h-3 w-3 text-indigo-600" />
+                  Target:
+                </span>
+                <span className="inline-flex items-center px-2 py-0.5 rounded-md text-[11px] font-medium bg-indigo-50 text-indigo-700 border border-indigo-100 max-w-[200px] truncate">
+                  {targetLabel}
+                </span>
               </div>
 
+              <span className="text-[11px] text-slate-400 hidden sm:inline">
+                Change scope in the top bar ↗
+              </span>
+            </div>
+
+            <div className="flex items-center gap-2 bg-slate-50 border border-slate-200 rounded-xl p-2 focus-within:ring-2 focus-within:ring-indigo-500 focus-within:bg-white transition-all">
               {/* Textarea Input */}
               <textarea
                 ref={inputRef}
@@ -529,7 +669,7 @@ export default function InsightsChatbotPage() {
                 value={inputValue}
                 onChange={(e) => setInputValue(e.target.value)}
                 onKeyDown={handleKeyDown}
-                placeholder="Ask a question"
+                placeholder={`Ask about ${targetLabel.toLowerCase()}...`}
                 className="flex-1 bg-transparent border-0 resize-none text-xs sm:text-sm text-slate-900 placeholder:text-slate-400 focus:outline-hidden px-2 py-1.5 leading-relaxed min-h-[38px] max-h-32"
               />
 
@@ -554,14 +694,7 @@ export default function InsightsChatbotPage() {
             {/* Subtle Status Line */}
             <div className="mt-1.5 flex items-center justify-between text-[11px] text-slate-400 px-1">
               <span>Conversations are persisted to database</span>
-              <span>
-                Target:{" "}
-                <strong className="text-slate-600 font-medium">
-                  {selectedCompetitorId === "all"
-                    ? `All Competitors (${totalCompetitorsCount})`
-                    : `${currentCompetitor?.name || "Competitor"} (${currentCompetitor?.activePlanCount ?? 0} plans)`}
-                </strong>
-              </span>
+              <span className="text-[10px] text-slate-400">Press Enter to send, Shift+Enter for newline</span>
             </div>
           </div>
         </Card>
