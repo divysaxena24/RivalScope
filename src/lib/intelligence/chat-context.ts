@@ -54,6 +54,37 @@ export interface GroundedCompetitorData {
   }>;
 }
 
+export type TimeframeFilter = "all" | "7d" | "30d" | "90d";
+
+export function getCutoffDateForTimeframe(timeframe?: TimeframeFilter): Date | null {
+  if (!timeframe || timeframe === "all") return null;
+  const now = new Date();
+  if (timeframe === "7d") {
+    return new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+  }
+  if (timeframe === "30d") {
+    return new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
+  }
+  if (timeframe === "90d") {
+    return new Date(now.getTime() - 90 * 24 * 60 * 60 * 1000);
+  }
+  return null;
+}
+interface CachedContext {
+  timestamp: number;
+  data: {
+    competitors: GroundedCompetitorData[];
+    summaryText: string;
+  };
+}
+
+const contextCache = new Map<string, CachedContext>();
+const CACHE_TTL_MS = 60 * 1000; // 60 seconds
+
+export function clearChatbotContextCache(): void {
+  contextCache.clear();
+}
+
 /**
  * Builds grounded knowledge base for selected competitor IDs (or all active competitors).
  * Enforces:
@@ -63,13 +94,27 @@ export interface GroundedCompetitorData {
  * 4. Preservation of monthly/yearly billing variants and currencies.
  * 5. Inclusion of source URLs and observation timestamps.
  * 6. Explicit marking of unavailable/missing data without stale fallback.
+ * 7. In-memory caching for ultra-fast subsequent queries.
  */
 export async function buildChatbotCompetitorContext(
-  competitorIds?: string[]
+  competitorIds?: string[],
+  forceFresh = false,
+  timeframe: TimeframeFilter = "all"
 ): Promise<{
   competitors: GroundedCompetitorData[];
   summaryText: string;
 }> {
+  const cutoffDate = getCutoffDateForTimeframe(timeframe);
+  const cacheKey = `${(competitorIds || ["all"]).slice().sort().join("::")}__timeframe_${timeframe}`;
+  const now = Date.now();
+
+  if (!forceFresh) {
+    const cached = contextCache.get(cacheKey);
+    if (cached && now - cached.timestamp < CACHE_TTL_MS) {
+      return cached.data;
+    }
+  }
+
   // 1. Fetch competitors
   let compQuery;
   if (competitorIds && competitorIds.length > 0 && !competitorIds.includes("all")) {
@@ -217,7 +262,12 @@ export async function buildChatbotCompetitorContext(
       }
     }
 
-    // 6. Recent pricing and packaging changes
+    // 6. Recent pricing and packaging changes (filtered by timeframe if specified)
+    const changeConditions = [eq(pricingChanges.competitorId, comp.id)];
+    if (cutoffDate) {
+      changeConditions.push(sql`${pricingChanges.detectedAt} >= ${cutoffDate}`);
+    }
+
     const changes = await db
       .select({
         changeType: pricingChanges.changeType,
@@ -228,7 +278,7 @@ export async function buildChatbotCompetitorContext(
         detectedAt: pricingChanges.detectedAt,
       })
       .from(pricingChanges)
-      .where(eq(pricingChanges.competitorId, comp.id))
+      .where(and(...changeConditions))
       .orderBy(desc(pricingChanges.detectedAt))
       .limit(10);
 
@@ -357,15 +407,15 @@ export async function buildChatbotCompetitorContext(
                   ? JSON.stringify(p.usageLimits)
                   : "Not specified in database records";
 
-              // Detailed feature entitlements from exact plan feature snapshots or declared features
+              // Concise feature summary to stay comfortably within Groq ITPM quotas
               let entitlementsText = "Standard entitlements";
               if (p.featureSnapshots.length > 0) {
                 entitlementsText = p.featureSnapshots
-                  .slice(0, 8)
+                  .slice(0, 4)
                   .map((f) => `${f.name}: ${f.value || "Included"}`)
                   .join("; ");
               } else if (p.features.length > 0) {
-                entitlementsText = p.features.slice(0, 6).join(", ");
+                entitlementsText = p.features.slice(0, 3).join(", ");
               }
 
               const observedDateText = p.lastObservedAt
@@ -382,7 +432,7 @@ export async function buildChatbotCompetitorContext(
     const generalFeaturesSummary =
       c.unassociatedFeatures.length > 0
         ? c.unassociatedFeatures
-            .slice(0, 15)
+            .slice(0, 5)
             .map((f) => `- ${f.name}: ${f.value || "Included"}`)
             .join("\n")
         : "None recorded.";
@@ -390,6 +440,7 @@ export async function buildChatbotCompetitorContext(
     const changesSummary =
       c.recentChanges.length > 0
         ? c.recentChanges
+            .slice(0, 3)
             .map((ch) => `- [${ch.changeType}] ${ch.description} (${new Date(ch.detectedAt).toISOString().split("T")[0]})`)
             .join("\n")
         : "No recent pricing changes detected.";
@@ -418,8 +469,15 @@ ${changesSummary}
 `);
   }
 
-  return {
+  const builtData = {
     competitors: result,
     summaryText: summaryParts.join("\n\n"),
   };
+
+  contextCache.set(cacheKey, {
+    timestamp: Date.now(),
+    data: builtData,
+  });
+
+  return builtData;
 }
