@@ -2,13 +2,18 @@ import { NextRequest } from "next/server";
 import { z } from "zod";
 import { getGroqClient } from "@/lib/ai/client";
 import { DEFAULT_EXTRACTION_CONFIG } from "@/lib/ai/model-config";
-import { buildChatbotCompetitorContext } from "@/lib/intelligence/chat-context";
+import { buildChatbotCompetitorContext, TimeframeFilter } from "@/lib/intelligence/chat-context";
 import {
   classifyQueryScope,
   normalizeChatError,
   OUT_OF_SCOPE_FRIENDLY_MESSAGE,
   INSUFFICIENT_DATA_FRIENDLY_MESSAGE,
 } from "@/lib/intelligence/chat-intent";
+import {
+  identifyDeterministicQuery,
+  executeDeterministicQuery,
+} from "@/lib/intelligence/deterministic-queries";
+import { verifyAndSanitizeResponse } from "@/lib/intelligence/evidence-guard";
 import { successResponse, errorResponse } from "@/lib/api/response";
 import { db } from "@/lib/db";
 import { chatSessions, chatMessages, competitors } from "@/lib/db/schema";
@@ -23,6 +28,7 @@ const ChatRequestSchema = z.object({
     })
   ).min(1),
   competitorIds: z.array(z.string()).optional(), // Empty or ["all"] implies all competitors
+  timeframe: z.enum(["all", "7d", "30d", "90d"]).optional(),
 });
 
 const BOUNDED_SYSTEM_PROMPT = `You are RivalScope Strategic Intelligence Assistant, an elite competitive analyst and pricing strategist.
@@ -50,14 +56,17 @@ Every response you generate MUST be clearly structured using clean Markdown form
    - Use bullet points to highlight key plan features, distinct advantages, or tier limitations.
    - Contrast differences between tiers using strictly verified evidence from the database.
 
-4. **### 4. Strategic Analysis & Recommendations (Grounded & Responsible)**
+4. **### 4. Derived Observations**
+   - Provide analytical synthesis drawn strictly from the facts above (e.g. comparison of price per month across tiers, common tier structures).
+
+5. **### 5. Strategic Recommendations & Assumptions (Grounded & Responsible)**
    - When proposing or evaluating strategy, clearly separate VERIFIED COMPETITOR FACTS from PROPOSED FEATURES or HYPOTHESES.
    - Do NOT claim a proposed plan is superior solely because it is cheaper. Evaluate trade-offs.
    - Ground recommendations in target customer profiles, usage limits, and infrastructure/inference cost assumptions.
    - Clearly label any unverified business assumptions with "[Assumption]".
    - Highlight packaging strategies (e.g., annual discount locks, usage metering vs flat rates) and recent movements from the audit log.
 
-5. **### 5. Grounding & Data Notes**
+6. **### 6. Grounding & Data Notes**
    - Clearly state which records were drawn from the verified database.
    - Note any missing data points with complete transparency ("Usage limits are not specified in current records").
    - Report any pricing conflicts between source documentation and persisted database records.
@@ -87,48 +96,52 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const { messages, competitorIds = ["all"], sessionId: requestedSessionId } = parsed.data;
+    const { messages, competitorIds = ["all"], sessionId: requestedSessionId, timeframe = "all" } = parsed.data;
     const latestUserMessage = messages[messages.length - 1];
 
-    // 1. Ensure or create Session
-    let activeSessionId = requestedSessionId;
-    if (!activeSessionId) {
-      // Auto-generate concise title from the user prompt
-      const titleSnippet = latestUserMessage.content.slice(0, 50).trim() || "Competitive Analysis";
-      const [newSession] = await db
-        .insert(chatSessions)
-        .values({
-          title: titleSnippet,
-          selectedCompetitors: competitorIds,
-        })
-        .returning();
-      activeSessionId = newSession.id;
-    } else {
-      // Update session's selected competitors & timestamp
-      await db
-        .update(chatSessions)
-        .set({
-          selectedCompetitors: competitorIds,
-          updatedAt: new Date(),
-        })
-        .where(eq(chatSessions.id, activeSessionId));
-    }
+    // 1. Session Setup and User Message Persistence in parallel
+    let activeSessionId: string = requestedSessionId || "";
+    const sessionPromise = (async () => {
+      if (!activeSessionId) {
+        const titleSnippet = latestUserMessage.content.slice(0, 50).trim() || "Competitive Analysis";
+        const [newSession] = await db
+          .insert(chatSessions)
+          .values({
+            title: titleSnippet,
+            selectedCompetitors: competitorIds,
+          })
+          .returning();
+        activeSessionId = newSession.id;
+      } else {
+        await db
+          .update(chatSessions)
+          .set({
+            selectedCompetitors: competitorIds,
+            updatedAt: new Date(),
+          })
+          .where(eq(chatSessions.id, activeSessionId));
+      }
 
-    // 2. Persist the User's Message to DB
-    await db.insert(chatMessages).values({
-      sessionId: activeSessionId,
-      role: "user",
-      content: latestUserMessage.content,
-      groundedCompetitorIds: competitorIds,
-    });
+      await db.insert(chatMessages).values({
+        sessionId: activeSessionId,
+        role: "user",
+        content: latestUserMessage.content,
+        groundedCompetitorIds: competitorIds,
+      });
+      return activeSessionId;
+    })();
 
-    // 2.1 Fast Scope Classification: Reject clearly out-of-scope inquiries without expensive retrieval
-    const activeCompetitorRecords = await db
-      .select({ id: competitors.id, name: competitors.name })
-      .from(competitors)
-      .where(eq(competitors.status, "active"));
+    // 2. Fetch grounded competitor facts (with in-memory cache) concurrently with session handling
+    const [resolvedSessionId, contextResult] = await Promise.all([
+      sessionPromise,
+      buildChatbotCompetitorContext(competitorIds, false, timeframe),
+    ]);
+    activeSessionId = resolvedSessionId;
 
-    const competitorNames = activeCompetitorRecords.map((c) => c.name);
+    const { competitors: activeComps, summaryText } = contextResult;
+    const competitorNames = activeComps.map((c) => c.name);
+
+    // 2.1 Fast Scope Classification: Reject clearly out-of-scope inquiries without LLM calls
     const scopeCheck = classifyQueryScope(latestUserMessage.content, competitorNames);
 
     if (!scopeCheck.inScope) {
@@ -147,9 +160,6 @@ export async function POST(req: NextRequest) {
         classification: "OUT_OF_SCOPE",
       });
     }
-
-    // 3. Fetch grounded competitor facts from Neon database
-    const { competitors: activeComps, summaryText } = await buildChatbotCompetitorContext(competitorIds);
 
     if (activeComps.length === 0) {
       const fallbackReply = "No active competitors found for the selected filter. Please track or activate competitors first.";
@@ -202,7 +212,54 @@ export async function POST(req: NextRequest) {
       });
     }
 
-    // 4. Request LLM completion with bounded context
+    // 4. Deterministic factual query evaluation (Zero LLM hallucination risk)
+    const deterministicCheck = identifyDeterministicQuery(
+      latestUserMessage.content,
+      competitorNames
+    );
+
+    if (deterministicCheck.isDeterministic && deterministicCheck.type) {
+      const deterministicResult = executeDeterministicQuery(
+        deterministicCheck.type,
+        activeComps,
+        deterministicCheck.targetCompetitor
+      );
+
+      // Persist assistant deterministic message
+      const groundedIds = activeComps.map((c) => c.id);
+      await db.insert(chatMessages).values({
+        sessionId: activeSessionId,
+        role: "assistant",
+        content: deterministicResult.markdownReply,
+        groundedCompetitorIds: groundedIds,
+      });
+
+      if (!requestedSessionId) {
+        const refinedTitle = latestUserMessage.content.slice(0, 45).trim();
+        await db
+          .update(chatSessions)
+          .set({ title: refinedTitle, updatedAt: new Date() })
+          .where(eq(chatSessions.id, activeSessionId));
+      }
+
+      return successResponse({
+        sessionId: activeSessionId,
+        reply: deterministicResult.markdownReply,
+        groundedCompetitors: activeComps.map((c) => ({
+          id: c.id,
+          name: c.name,
+          domain: c.domain,
+          planCount: c.plans.length,
+          featureCount:
+            c.plans.reduce((fAcc, p) => fAcc + p.featureSnapshots.length, 0) +
+            c.unassociatedFeatures.length,
+          changeCount: c.recentChanges.length,
+        })),
+        isDeterministic: true,
+      });
+    }
+
+    // 5. LLM completion with bounded context and retry handling for transient errors
     const groq = getGroqClient();
 
     const systemMessage = `${BOUNDED_SYSTEM_PROMPT}
@@ -219,16 +276,51 @@ ${summaryText}
       })),
     ];
 
-    const completion = await groq.chat.completions.create({
-      model: DEFAULT_EXTRACTION_CONFIG.model,
-      messages: groqMessages,
-      temperature: 0.2, // Low temperature for high factual precision
-      max_tokens: 1200,
-    });
+    let rawReply = "";
+    let attempts = 0;
+    const maxAttempts = 2;
 
-    const reply = completion.choices[0]?.message?.content || "I was unable to formulate a response from the current competitor data.";
+    while (attempts <= maxAttempts) {
+      try {
+        attempts++;
+        const completion = await groq.chat.completions.create({
+          model: DEFAULT_EXTRACTION_CONFIG.model,
+          messages: groqMessages,
+          temperature: 0.2, // Low temperature for high factual precision
+          max_tokens: 900, // Stay safely within Groq OTPM 1000 limit
+        });
 
-    // 5. Persist Assistant Message to DB
+        rawReply = completion.choices[0]?.message?.content || "";
+        if (rawReply.trim().length > 0) {
+          break;
+        }
+      } catch (callErr: unknown) {
+        const isTransient =
+          callErr instanceof Error &&
+          (callErr.message.includes("429") ||
+            callErr.message.includes("rate limit") ||
+            callErr.message.includes("502") ||
+            callErr.message.includes("503") ||
+            callErr.message.includes("ECONNRESET") ||
+            callErr.message.includes("timeout"));
+
+        if (isTransient && attempts <= maxAttempts) {
+          await new Promise((resolve) => setTimeout(resolve, 1500 * attempts));
+          continue;
+        }
+        throw callErr;
+      }
+    }
+
+    if (!rawReply || rawReply.trim().length === 0) {
+      rawReply = "I was unable to formulate a response from the current competitor data.";
+    }
+
+    // 6. Evidence-Constrained Sanitization Layer: Verify and sanitize unsupported claims
+    const verifiedOutput = verifyAndSanitizeResponse(rawReply, activeComps);
+    const reply = verifiedOutput.sanitizedText;
+
+    // 7. Persist Assistant Message to DB
     const groundedIds = activeComps.map((c) => c.id);
     await db.insert(chatMessages).values({
       sessionId: activeSessionId,
@@ -259,6 +351,7 @@ ${summaryText}
           c.unassociatedFeatures.length,
         changeCount: c.recentChanges.length,
       })),
+      isDeterministic: false,
     });
   } catch (err: unknown) {
     console.error("Error in insights chat route:", err);
