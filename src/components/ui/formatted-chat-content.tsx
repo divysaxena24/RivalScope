@@ -81,11 +81,37 @@ export function FormattedChatContent({ content, isUser }: FormattedChatContentPr
       }
     }
 
+    // Markdown Blockquotes / Alerts (e.g. > [!WARNING] or > quotes)
+    if (trimmed.startsWith("> ")) {
+      const quoteText = trimmed.replace(/^>\s*/, "");
+      if (quoteText.startsWith("[!WARNING]")) {
+        renderedElements.push(
+          <div key={`alert-warn-${keyIndex++}`} className="my-2 p-2.5 rounded-md bg-amber-50 border border-amber-200 text-amber-900 text-xs flex items-start gap-2">
+            <span className="font-bold text-amber-700">⚠️ Notice:</span>
+            <span>{quoteText.replace("[!WARNING]", "").trim()}</span>
+          </div>
+        );
+      } else {
+        renderedElements.push(
+          <div key={`quote-${keyIndex++}`} className="my-1.5 pl-3 border-l-2 border-slate-300 text-xs text-slate-600 italic">
+            {renderFormattedInline(quoteText)}
+          </div>
+        );
+      }
+      continue;
+    }
+
     // Markdown Headers
-    if (trimmed.startsWith("### ")) {
+    if (trimmed.startsWith("#### ")) {
       renderedElements.push(
-        <h4 key={`h3-${keyIndex++}`} className="text-sm font-bold text-slate-900 mt-3 mb-1.5 flex items-center gap-1.5">
-          {trimmed.replace("### ", "")}
+        <h5 key={`h4-${keyIndex++}`} className="text-xs font-bold text-slate-800 uppercase tracking-wider mt-3 mb-1">
+          {renderFormattedInline(trimmed.replace("#### ", ""))}
+        </h5>
+      );
+    } else if (trimmed.startsWith("### ")) {
+      renderedElements.push(
+        <h4 key={`h3-${keyIndex++}`} className="text-sm font-bold text-slate-900 mt-4 mb-1.5 flex items-center gap-1.5 border-b border-slate-100 pb-1">
+          {renderFormattedInline(trimmed.replace("### ", ""))}
         </h4>
       );
     } else if (trimmed.startsWith("## ")) {
