@@ -5,7 +5,8 @@ import * as schema from "./schema";
 
 dotenv.config({ path: ".env.local" });
 
-const connectionString = process.env.DATABASE_URL;
+const rawConnectionString = process.env.DATABASE_URL;
+const connectionString = rawConnectionString ? rawConnectionString.replace(/^["']|["']$/g, "").trim() : "";
 
 if (!connectionString) {
   // Fail with a descriptive message on server execution if DATABASE_URL is not set
